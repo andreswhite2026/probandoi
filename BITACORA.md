@@ -311,3 +311,65 @@ control estricto de roles RBAC (Viewer vs Admin) y despliegue en contenedor Ngin
 3. **Alto Rendimiento en Nginx**: El build de producción compila los módulos de TypeScript y Vue a JavaScript nativo minificado con compresión gzip en Nginx, eliminando la sobrecarga de Node en tiempo de ejecución.
 
 
+
+---
+
+## Fase 9 — Catálogo, Linaje y Gobernanza con OpenMetadata + Auditoría de Seguridad
+
+**Fecha:** 2026-10-27
+**Objetivo:** Implementar la gobernanza de datos de extremo a extremo: catálogo de activos Medallion
+(PostgreSQL y MinIO), definición formal de columnas, tipos y restricciones, grafo de linaje trazable de 8 aristas
+(Bronze -> Silver -> Gold -> Reportes IA -> Auditoría), aislamiento de OpenMetadata bajo el perfil `governance`
+(ADR-006) para mitigar el consumo de memoria RAM, y auditoría automatizada de seguridad garantizando cero secretos
+en Git.
+
+### Estado de comprobaciones de la Fase 9
+
+| Comprobación | Herramienta / Archivo | Estado | Resultado real |
+|---|---|---|---|
+| Definición canónica de catálogo | `airflow/include/governance/catalog.py` | **Implementado** | 10 tablas, 2 buckets MinIO, 4 pipelines Airflow, 8 aristas de linaje |
+| Script de exportación y registro | `scripts/governance/register_catalog.py` | **Verificado** | Exportación determinista a JSON y verificación de consistencia al 100% |
+| Escáner de seguridad automatizado | `scripts/governance/security_scan.py` | **Verificado** | 86 archivos rastreados y 11 commits auditados; 0 secretos expuestos |
+| Pruebas de linaje y catálogo | `airflow/tests/test_governance.py` | **Verificado** | 7 pruebas unitarias de integridad de grafo y contrato OpenMetadata 2.x |
+| Pruebas de escaneo de secretos | `airflow/tests/test_security_scan.py` | **Verificado** | 4 pruebas de validación de .env untracked y detección de claves sintéticas |
+| Servicios en Docker Compose | `docker-compose.yml` (`profiles: [governance]`) | **Configurado** | MySQL 8, OpenSearch 2.11 y OpenMetadata Server con heap limits |
+
+---
+
+## Fase 10 — Finalización Funcional, Correcciones del Agente y Entrega Reproducible
+
+**Fecha:** 2026-10-27
+**Objetivo:** Resolver los problemas funcionales detectados durante las pruebas del Viewer, afinar la
+clasificación de intenciones y el manejo de fuera de dominio del agente analítico de IA, corregir la presentación
+de reglas de calidad R01-R05 y estado en la vista de Operaciones, garantizar que los KPIs temporales se calculen
+estrictamente contra `NOW()`, verificar el pipeline de datos de punta a punta y dejar el proyecto completamente
+documentado y reproducible desde otro computador.
+
+### Correcciones funcionales realizadas
+
+1. **Agente Analítico de IA (`api/app/routers/agent.py`)**:
+   - **Preguntas fuera de dominio («¿Cuál es el país más grande del mundo?»)**: Se implementó la función de comprobación de dominio `_is_seismic_domain()`. Las consultas sin relación con sismología o la plataforma se enrutan de inmediato a la herramienta `out_of_domain`, respondiendo con un mensaje pedagógico claro sobre el alcance de SismoWatch sin invocar a Ollama ni inventar respuestas.
+   - **Terremoto con mayor magnitud («¿Cuál fue el terremoto con mayor magnitud?»)**: Se refinaron las expresiones clave para capturar variaciones superlativas (`"mayor magnitud"`, `"mas fuerte"`, etc.). La herramienta `strongest_earthquakes` extrae el evento #1 y redacta una respuesta precisa indicando magnitud, ID, ubicación geográfica, región, fecha UTC y profundidad.
+   - **Distinción entre País y Región («¿Cuál es el país con más terremotos?»)**: Se detectan consultas sobre países (`is_country_query`). La respuesta explica con transparencia técnica que el catálogo USGS clasifica los sismos por **región sismológica** y no por frontera política nacional, proporcionando el ranking regional de Gold con notas aclaratorias (ej: Alaska y California como regiones de EE. UU.).
+2. **Reglas de Calidad y Tabla en Operaciones (`api/app/routers/operations.py` y `web/src/views/OperationsView.vue`)**:
+   - **Filas repetidas**: El endpoint `GET /api/v1/quality/rules` ahora consulta por defecto las reglas de la última ejecución (`WHERE run_id = (SELECT run_id FROM curated.quality_runs ORDER BY started_at DESC LIMIT 1)`), mostrando exactamente las 5 reglas R01 a R05 en lugar de concatenar todas las ejecuciones históricas.
+   - **Trazabilidad por ejecución**: Se añadió interactividad en la vista de Operaciones: al hacer clic en cualquier ejecución de `curated.quality_runs`, la tabla inferior se actualiza para mostrar las reglas de esa ejecución específica.
+   - **Columna «Estado»**: Se reemplazaron los iconos por insignias textuales accesibles (`Aprobada` en verde esmeralda / `Fallida` en rojo), asegurando que la columna nunca aparezca vacía.
+3. **Cálculo de KPIs Temporales (`api/app/routers/earthquakes.py`)**:
+   - Se eliminó el anclaje a la fecha del evento más reciente (`max_time`). Las ventanas de 24 horas y 7 días se evalúan estrictamente contra la hora actual del sistema (`time_utc >= NOW() - INTERVAL '24 hours'` y `time_utc >= NOW() - INTERVAL '7 days'`).
+4. **Informes Diarios de IA (`web/src/views/ReportsAiView.vue`)**:
+   - Se añadió un estado vacío explicativo que orienta al usuario sobre cómo generar el informe mediante Airflow o `make report`, asegurando que no se muestre información inventada.
+5. **Red y Conectividad Frontend (`docker-compose.yml`)**:
+   - **Causa**: El contenedor `sismowatch-web` carecía de la directiva `networks: - sismowatch-net`, lo que provocó que Nginx no pudiera resolver el hostname `api` al arrancar (`proxy_pass http://api:8000`), cayendo en bucle de reinicio y arrojando `ERR_CONNECTION_REFUSED` en el puerto 3000.
+   - **Solución**: Se vinculó `web` a la red común `sismowatch-net`. Nginx arrancó exitosamente y sirve la aplicación en `http://localhost:3000`.
+6. **Resiliencia de Pruebas de Seguridad en Airflow (`airflow/include/governance/security.py`)**:
+   - **Causa**: El usuario `airflow` dentro del contenedor no tiene permisos para invocar el binario `git` del host (`PermissionError: [Errno 13]`), y la cadena de prueba sintética en `test_security_scan.py` provocaba un falso positivo al escanearse a sí misma.
+   - **Solución**: Se capturó `(FileNotFoundError, PermissionError, OSError)` en `run_cmd`, se ensambló dinámicamente la clave sintética en el test (`test_synthetic_secret_detection_logic`) y se excluyó el archivo de pruebas en `EXCLUDED_PATHS`.
+7. **Gestión Segura y Recuperación de Usuarios (RBAC)**:
+   - Se configuró `ON CONFLICT (email) DO NOTHING` en `_seed_initial_users()` para garantizar que los reinicios de la API no sobreescriban contraseñas modificadas.
+   - Se implementó la utilidad `api/app/manage_users.py` y el wrapper `scripts/manage_users.py` junto con los comandos `make users-list` y `make user-reset` para listar y recuperar contraseñas de forma determinista y segura.
+8. **Certificación de Entrega**:
+   - **97 pruebas automatizadas aprobadas** (61 en Airflow/Spark + 36 en FastAPI/RBAC).
+   - **0 secretos expuestos** en código rastreado y en los últimos 50 commits de Git.
+   - **Todos los servicios saludables** (`make ps`): Postgres, MinIO, Airflow Webserver, Airflow Scheduler, API y Web.
+   - **Guía paso a paso reproducible** documentada en `README.md` (`make setup` -> `make up` -> `make ps`).

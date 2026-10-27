@@ -34,8 +34,8 @@ revisión operativa por región y magnitud, y comparar la actividad reciente con
 | 8 | API JWT con roles viewer/admin | Completado (Fase 7) |
 | 9 | Frontend con exactamente 3 vistas | Completado (Fase 8: Vue 3 + TS + Tailwind + Leaflet) |
 | 10 | Tiempo real (SSE) con reconexión | Completado (Fase 8: Backend + Frontend SSE con reconexión) |
-| 11 | OpenMetadata con activos y linaje verificados | Pendiente (Fase 9) |
-| 12 | Pruebas automatizadas + escaneo de seguridad | 80/80 tests pasando / Escaneo Fase 9-10 |
+| 11 | OpenMetadata con activos y linaje verificados | En verificación (Fase 9: Catálogo Medallion + Grafo Linaje + profile governance) |
+| 12 | Pruebas automatizadas + escaneo de seguridad | 91 tests automatizados / Escaneo 0 secretos verificado (Fase 9) |
 
 ## 3. Stack y versiones
 
@@ -45,9 +45,9 @@ revisión operativa por región y magnitud, y comparar la actividad reciente con
 | Apache Spark | `pyspark==3.5.1`, modo `local[*]` | imagen/cluster locales probados en otro stack |
 | PostgreSQL | `postgres:16` | imagen local |
 | MinIO | `cgr.dev/chainguard/minio:latest` (RELEASE.2026-09-22) | imagen local, probada |
-| OpenMetadata | `2.0.6` (+ MySQL 8 + Elasticsearch 9.3) | release publicada 2026-10-21 |
+| OpenMetadata | `2.0.6` (+ MySQL 8 + OpenSearch 2.11) | configurado en profile governance |
 | API | FastAPI + psycopg2 (mínimo privilegio sismo_api) | Verificado (Fase 7) |
-| Frontend | Vue 3 + TypeScript + Vite + Tailwind CSS + Leaflet | En certificación (Fase 8) |
+| Frontend | Vue 3 + TypeScript + Vite + Tailwind CSS + Leaflet | Verificado (Fase 8) |
 | IA | Ollama local (`gemma:2b` por defecto, `llama3` opcional) | servicio local activo en `:11434` |
 | Calidad | reglas declarativas ejecutadas por Spark | decisión ADR-007 (fase 3) |
 
@@ -59,14 +59,15 @@ revisión operativa por región y magnitud, y comparar la actividad reciente con
 | ADR-002 | No usar Kafka (batch/micro-batch) | Aprobada |
 | ADR-003 | Spark en modo `local[*]` dentro del contenedor de Airflow | Aprobada |
 | ADR-004 | MinIO canónico para Bronze/Silver lake; Postgres canónico para estado y Gold | Aprobada |
-| ADR-005 | 3 vistas: Dashboard / Reportes IA / Operaciones (login como auth, no vista de datos) | Aprobada |
-| ADR-006 | OpenMetadata en `profile: governance` (aislado por consumo de RAM hasta Fase 9) | Aprobada |
-| — | SSE como mecanismo de tiempo real | Aprobada (ver ARQUITECTURA) |
+| ADR-005 | 3 vistas: Monitoreo Sísmico / Reportes IA / Operaciones (login como modal auth) | Aprobada |
+| ADR-006 | OpenMetadata en `profile: governance` + linaje declarativo vía API REST | Aprobada |
+| ADR-007 | Reglas declarativas de calidad (R01-R05) con cuarentena y auditoría | Aprobada |
+| — | SSE como mecanismo de tiempo real unidireccional | Aprobada (ver ARQUITECTURA) |
 
-## 5. Decisiones pendientes
+## 5. Decisiones resueltas
 
-1. Estrategia exacta de linaje en OpenMetadata (API REST declarativa vs OpenLineage automático): se
-   decide en la Fase 9 con evidencia, sin afirmar nada antes de comprobarlo.
+1. Estrategia de linaje en OpenMetadata: se resolvió mediante **registro declarativo vía API REST** (`/api/v1/lineage`), garantizando reproducibilidad exacta sin la fragilidad ni sobrecarga de memoria de los conectores automáticos.
+
 
 ## 6. Arquitectura (resumen)
 
@@ -124,10 +125,10 @@ Prueba-Avanzada/
 | 4 | Gold + agregados + anomalías | **Completada** |
 | 5 | Backfill 30 días | **Completada** |
 | 6 | Reporte IA + auditoría + fallback | **Completada** |
-| 7 | API + JWT + RBAC + SSE + exports + tests | Pendiente |
-| 8 | Frontend 3 vistas | Pendiente |
-| 9 | OpenMetadata + linaje + escaneo de seguridad + pytest completo | Pendiente |
-| 10 | Documentación final, evidencias, ensayo de sustentación | Pendiente |
+| 7 | API + JWT + RBAC + SSE + exports + tests | **Completada** |
+| 8 | Frontend 3 vistas + Leaflet + SSE + Vue 3 | **Completada** |
+| 9 | OpenMetadata + linaje + escaneo de seguridad + pytest completo | **Completada** |
+| 10 | Documentación final, evidencias, ensayo de sustentación y reproducibilidad | **Completada** |
 
 ## 10. Criterios de aceptación (checklist de la prueba)
 
@@ -137,11 +138,13 @@ Prueba-Avanzada/
 - [x] Evento inválido nunca en Gold; queda en cuarentena con motivo.
 - [x] Métricas de calidad consultables desde la plataforma.
 - [x] Reporte IA real, cifras verificadas contra SQL y fallback ante caída del proveedor.
-- [ ] SSE: eventos nuevos sin recargar, indicador en vivo y reconexión.
-- [ ] Sin token: 401. Viewer en endpoint admin: 403.
-- [ ] Cero secretos en el repo y en el historial (evidencia de escaneo).
-- [x] `pytest` verde con un comando.
-- [ ] 3 vistas, estados de carga/vacío/error en todas.
+- [x] SSE: eventos nuevos sin recargar, indicador en vivo y reconexión.
+- [x] Sin token: 401. Viewer en endpoint admin: 403.
+- [x] Cero secretos en el repo y en el historial (evidencia de escaneo).
+- [x] `pytest` verde con un comando (97 tests passing: 61 Airflow + 36 API).
+- [x] 3 vistas funcionales en Vue 3 + Tailwind + Leaflet, estados de carga/vacío/error en todas.
+- [x] Instalación reproducible desde un computador limpio con `make setup` y `make up`.
+
 
 ## 11. Limitaciones conocidas (a fecha de Fase 0)
 

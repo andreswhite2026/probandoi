@@ -138,48 +138,46 @@ def get_kpis(
                 top_region_24h=None,
             )
 
-        # Usar la referencia más reciente entre now() y el último evento
+        # Calcular KPIs respecto a la hora actual (NOW() en UTC)
         cur.execute(
             """
             SELECT
-                COUNT(*) FILTER (WHERE time_utc >= %s - INTERVAL '24 hours') AS total_24h,
-                COUNT(*) FILTER (WHERE time_utc >= %s - INTERVAL '7 days') AS total_7d,
-                MAX(mag) FILTER (WHERE time_utc >= %s - INTERVAL '24 hours') AS max_mag_24h,
-                AVG(mag) FILTER (WHERE time_utc >= %s - INTERVAL '24 hours') AS avg_mag_24h,
-                COUNT(*) FILTER (WHERE time_utc >= %s - INTERVAL '24 hours' AND tsunami = true) AS tsunami_alerts_24h
+                COUNT(*) FILTER (WHERE time_utc >= NOW() - INTERVAL '24 hours') AS total_24h,
+                COUNT(*) FILTER (WHERE time_utc >= NOW() - INTERVAL '7 days') AS total_7d,
+                MAX(mag) FILTER (WHERE time_utc >= NOW() - INTERVAL '24 hours') AS max_mag_24h,
+                ROUND(AVG(mag) FILTER (WHERE time_utc >= NOW() - INTERVAL '24 hours')::numeric, 2) AS avg_mag_24h,
+                COUNT(*) FILTER (WHERE time_utc >= NOW() - INTERVAL '24 hours' AND tsunami = true) AS tsunami_alerts_24h
             FROM curated.earthquakes
-            """,
-            (latest_event_time, latest_event_time, latest_event_time, latest_event_time, latest_event_time),
+            """
         )
         stats = cur.fetchone()
 
-        # Top región en 24h
+        # Top región en últimas 24 horas respecto a NOW()
         cur.execute(
             """
             SELECT region, COUNT(*) AS count
             FROM curated.earthquakes
-            WHERE time_utc >= %s - INTERVAL '24 hours' AND region IS NOT NULL
+            WHERE time_utc >= NOW() - INTERVAL '24 hours' AND region IS NOT NULL
             GROUP BY region
             ORDER BY count DESC
             LIMIT 1
-            """,
-            (latest_event_time,),
+            """
         )
         top_region_row = cur.fetchone()
         top_region = top_region_row["region"] if top_region_row else None
 
-        # Anomalías activas detectadas en el periodo reciente
+        # Anomalías activas detectadas en últimas 24 horas respecto a NOW()
         cur.execute(
             """
             SELECT COUNT(*) AS active_anomalies
             FROM curated.anomalies
             WHERE is_anomaly = true
-              AND window_start >= %s - INTERVAL '24 hours'
-            """,
-            (latest_event_time,),
+              AND window_start >= NOW() - INTERVAL '24 hours'
+            """
         )
         anomalies_row = cur.fetchone()
         active_anomalies = anomalies_row["active_anomalies"] if anomalies_row else 0
+
 
     return KPIsResponse(
         total_24h=int(stats["total_24h"] or 0),

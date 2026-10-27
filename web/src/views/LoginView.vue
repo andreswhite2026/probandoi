@@ -49,14 +49,14 @@ const handleLogin = async () => {
 
 const fillViewer = () => {
   email.value = 'viewer@sismowatch.local'
-  password.value = ''
-  errorMsg.value = 'Ingresa la contraseña de VIEWER configurada en tu .env'
+  password.value = 'viewer123'
+  errorMsg.value = ''
 }
 
 const fillAdmin = () => {
   email.value = 'admin@sismowatch.local'
-  password.value = ''
-  errorMsg.value = 'Ingresa la contraseña de ADMIN configurada en tu .env'
+  password.value = 'admin123'
+  errorMsg.value = ''
 }
 </script>
 

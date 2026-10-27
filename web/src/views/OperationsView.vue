@@ -32,8 +32,18 @@ const pipelineRuns = ref<PipelineRun[]>([])
 const qualityRuns = ref<QualityRun[]>([])
 const qualityRules = ref<QualityRule[]>([])
 const quarantineItems = ref<QuarantineItem[]>([])
+const selectedQualityRunId = ref<string>('')
 const loading = ref(false)
 const errorMsg = ref('')
+
+const selectQualityRun = async (runId: string) => {
+  selectedQualityRunId.value = runId
+  try {
+    qualityRules.value = await fetchQualityRules(runId)
+  } catch (err: any) {
+    console.error('Error cargando reglas para run:', runId, err)
+  }
+}
 
 // Formulario de Backfill (Solo Admin)
 const backfillDays = ref(30)
@@ -54,6 +64,11 @@ const loadOperationsData = async () => {
     pipelineRuns.value = pRuns
     qualityRuns.value = qRuns
     qualityRules.value = qRules
+
+    if (qRuns.length > 0 && !selectedQualityRunId.value) {
+      selectedQualityRunId.value = qRuns[0].run_id
+    }
+
 
     // Solo consultar cuarentena si es admin
     if (isAdmin.value) {
@@ -221,7 +236,14 @@ onMounted(() => {
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
-              <tr v-for="q in qualityRuns" :key="q.run_id" class="hover:bg-slate-800/40">
+              <tr
+                v-for="q in qualityRuns"
+                :key="q.run_id"
+                @click="selectQualityRun(q.run_id)"
+                class="hover:bg-slate-800/40 cursor-pointer transition-colors"
+                :class="{ 'bg-slate-800/80 ring-1 ring-sky-500/50': selectedQualityRunId === q.run_id }"
+                title="Haz clic para inspeccionar las reglas de esta ejecución"
+              >
                 <td class="py-3 px-4 font-mono text-xs text-slate-300">{{ q.layer }}</td>
                 <td class="py-3 px-4 text-right font-mono text-xs">{{ q.evaluated }}</td>
                 <td class="py-3 px-4 text-right font-mono text-xs text-emerald-400">{{ q.approved }}</td>
@@ -246,7 +268,17 @@ onMounted(() => {
 
       <!-- Detalle por Reglas R01-R05 -->
       <div>
-        <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Detalle de Reglas Evaluadas (curated.quality_rules)</h3>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
+            <span>Detalle de Reglas Evaluadas (curated.quality_rules)</span>
+            <span v-if="selectedQualityRunId" class="text-sky-400 font-mono text-[10px] font-normal px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
+              Run: {{ selectedQualityRunId.slice(0, 8) }}...
+            </span>
+          </h3>
+          <span class="text-[11px] text-slate-500 italic">
+            (Haz clic en una fila del historial para ver sus reglas asociadas)
+          </span>
+        </div>
         <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
           <table class="w-full text-left text-sm text-slate-300">
             <thead class="bg-slate-800/80 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-700">
@@ -274,14 +306,19 @@ onMounted(() => {
                 <td class="py-3 px-4 text-right font-mono text-xs">{{ r.evaluated }}</td>
                 <td class="py-3 px-4 text-right font-mono text-xs" :class="r.failed > 0 ? 'text-rose-400 font-bold' : 'text-slate-500'">{{ r.failed }}</td>
                 <td class="py-3 px-4 text-center">
-                  <CheckCircle v-if="r.passed" class="w-4 h-4 text-emerald-400 mx-auto" />
-                  <XCircle v-else class="w-4 h-4 text-rose-400 mx-auto" />
+                  <span
+                    class="px-2.5 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider inline-block"
+                    :class="r.passed ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'"
+                  >
+                    {{ r.passed ? 'Aprobada' : 'Fallida' }}
+                  </span>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
+
     </div>
 
     <!-- Pestaña 3: Cuarentena (Solo Admin) -->

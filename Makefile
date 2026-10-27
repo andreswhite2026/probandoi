@@ -11,12 +11,21 @@ MC_IMAGE ?= bitnamilegacy/minio-client:2025.7.21-debian-12-r3
 -include .env
 export
 
-.PHONY: help build up down restart ps logs psql psql-api minio-ls airflow-shell smoke
+.PHONY: help setup build up down restart ps logs psql psql-api minio-ls airflow-shell smoke
 
 help: ## Muestra los objetivos disponibles
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-build: ## Construye la imagen de Airflow (JDK + Spark + JAR)
+setup: ## Prepara el entorno inicial creando .env si no existe
+	@if [ ! -f .env ]; then \
+		echo "Creando .env a partir de .env.example..."; \
+		cp .env.example .env; \
+		echo "✓ Archivo .env creado con éxito."; \
+	else \
+		echo "✓ .env ya existe, conservando configuración actual."; \
+	fi
+
+build: ## Construye las imágenes Docker del proyecto
 	$(COMPOSE) build
 
 up: ## Levanta el entorno en segundo plano
@@ -97,6 +106,12 @@ test-api: ## Ejecuta la suite de pruebas unitarias y de integración de la API
 
 test-all: test test-api ## Ejecuta todas las pruebas (pipeline + API)
 
+users-list: ## Lista los usuarios registrados en app.users y sus roles
+	$(COMPOSE) exec -T api python3 -m app.manage_users --list
+
+user-reset: ## Restablece la contraseña de un usuario (ej: make user-reset EMAIL=admin@sismowatch.local PASSWORD=nuevo_pass)
+	$(COMPOSE) exec -T api python3 -m app.manage_users --reset-password --email "$(EMAIL)" --password "$(PASSWORD)"
+
 rbac-check: ## Prueba en vivo los controles RBAC con curl (401, 403 viewer, 200 admin)
 	@echo "=== 1. Prueba 401 Unauthorized (sin token) ==="
 	@curl -i -s http://localhost:8000/api/v1/quarantine | head -n 8
@@ -143,6 +158,28 @@ viewer-check: ## Prueba los permisos del rol viewer (200 en lectura, 403 en cuar
 	curl -i -s -H "Authorization: Bearer $$VIEWER_TOKEN" http://localhost:8000/api/v1/quarantine | head -n 8; \
 	echo "\n=== 4. Intento de disparo de Backfill (debe dar 403) ==="; \
 	curl -i -s -H "Authorization: Bearer $$VIEWER_TOKEN" -H "Content-Type: application/json" -d '{"days":7}' http://localhost:8000/api/v1/backfill/trigger | head -n 8
+
+governance-up: ## Levanta OpenMetadata en segundo plano (perfil governance: MySQL, OpenSearch, Server)
+	$(COMPOSE) --profile governance up -d
+
+governance-down: ## Detiene los servicios de OpenMetadata (perfil governance)
+	$(COMPOSE) --profile governance down
+
+governance-ps: ## Estado de salud de los servicios de gobernanza
+	$(COMPOSE) --profile governance ps
+
+governance-catalog: ## Exporta y verifica de forma determinista el catalogo y linaje Medallion
+	python3 scripts/governance/register_catalog.py --verify --export-spec scripts/governance/catalog_spec.json
+
+governance-live: ## Registra el catalogo y aristas de linaje en vivo en OpenMetadata
+	python3 scripts/governance/register_catalog.py --live --om-url http://localhost:8585
+
+security-scan: ## Audita archivos rastreados e historial de commits asegurando cero secretos
+	python3 scripts/governance/security_scan.py
+
+test-governance: ## Ejecuta pruebas de catalogo, linaje y escaneo de seguridad en Airflow
+	$(COMPOSE) exec -T airflow-scheduler pytest /opt/airflow/tests/test_governance.py /opt/airflow/tests/test_security_scan.py -v
+
 
 
 

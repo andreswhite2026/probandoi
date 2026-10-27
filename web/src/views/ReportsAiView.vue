@@ -153,6 +153,7 @@ onMounted(() => {
             <Calendar class="w-4 h-4 text-sky-400" />
             <span class="text-xs font-semibold uppercase tracking-wider text-slate-300">Fecha del Informe:</span>
             <select
+              v-if="reportsList.length > 0"
               v-model="selectedDate"
               @change="loadReportDetail(selectedDate)"
               class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono"
@@ -161,6 +162,7 @@ onMounted(() => {
                 {{ r.reference_date }} ({{ r.status === 'fallback' ? 'Fallback determinista' : 'IA OK' }})
               </option>
             </select>
+            <span v-else class="text-xs text-slate-500 italic">Sin informes registrados aún</span>
           </div>
 
           <div v-if="currentReport" class="flex items-center space-x-2 text-xs">
@@ -235,10 +237,19 @@ onMounted(() => {
             </div>
           </div>
 
-          <div v-else class="py-20 text-center text-slate-500">
-            No se encontró ningún informe generado en la capa Gold para la fecha seleccionada.
+          <div v-else class="py-16 text-center space-y-4">
+            <div class="w-12 h-12 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto text-slate-400">
+              <Calendar class="w-6 h-6 text-slate-500" />
+            </div>
+            <div class="space-y-1">
+              <p class="text-slate-300 text-sm font-medium">No se encontró informe generado para la fecha seleccionada.</p>
+              <p class="text-xs text-slate-500 max-w-md mx-auto">
+                Los informes diarios se generan automáticamente a la 01:00 UTC por el DAG de Airflow <code class="text-sky-400">daily_ai_report</code> o mediante el comando de consola <code class="text-emerald-400">make report</code>.
+              </p>
+            </div>
           </div>
         </div>
+
       </div>
 
       <!-- Columna Derecha: Asistente Analítico de IA (5 cols) -->

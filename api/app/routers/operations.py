@@ -63,18 +63,22 @@ def list_quality_rules(
     run_id: Optional[str] = Query(default=None, description="Filtrar por run_id específico"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[QualityRuleResponse]:
-    """Retorna las reglas evaluadas (R01-R05) y su resultado (passed, failed, severidad)."""
-    where_sql = "WHERE run_id = %s" if run_id else ""
-    params = (run_id,) if run_id else ()
-
+    """Retorna las reglas evaluadas (R01-R05) asociadas a una ejecución (por defecto, la más reciente)."""
     with get_db_cursor() as cur:
+        if run_id:
+            where_sql = "WHERE run_id = %s"
+            params: tuple[Any, ...] = (run_id,)
+        else:
+            where_sql = "WHERE run_id = (SELECT run_id FROM curated.quality_runs ORDER BY started_at DESC LIMIT 1)"
+            params = ()
+
         cur.execute(
             f"""
             SELECT id, run_id, rule_code, description, severity, evaluated, failed, passed
             FROM curated.quality_rules
             {where_sql}
-            ORDER BY id ASC
-            LIMIT 200
+            ORDER BY rule_code ASC
+            LIMIT 50
             """,
             params,
         )
@@ -93,6 +97,7 @@ def list_quality_rules(
         )
         for r in rows
     ]
+
 
 
 @router.get("/pipeline/runs", response_model=List[PipelineRunResponse], summary="Estado de ejecuciones de DAGs")

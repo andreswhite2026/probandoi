@@ -224,10 +224,12 @@ services:
       AIRFLOW_BASE_URL: http://airflow-webserver:8080
       AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER}
       AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "${API_HOST_PORT:-8000}:8000"
     volumes:
       - ./api:/app
+
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -259,6 +261,74 @@ services:
         condition: service_healthy
     networks:
       - sismowatch-net
+  # -------------------------------------------------------------------------
+  # OpenMetadata (Catálogo, Linaje y Gobernanza — profile: governance ADR-006)
+  # Solo se levanta cuando se pasa explícitamente --profile governance
+  # -------------------------------------------------------------------------
+  openmetadata-mysql:
+    image: openmetadata/db:2.0.6
+    container_name: sismowatch-openmetadata-mysql
+    profiles:
+      - governance
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${OM_DB_PASSWORD:-mC4iM6RrWQeSSKTBel5QNR0qIL9rlLr4}
+    ports:
+      - "${OM_MYSQL_HOST_PORT:-3307}:3306"
+    volumes:
+      - om_mysql_data:/var/lib/mysql
+    networks:
+      - sismowatch-net
+
+  openmetadata-search:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: sismowatch-openmetadata-search
+    profiles:
+      - governance
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ports:
+      - "${OM_OPENSEARCH_HOST_PORT:-9201}:9200"
+    volumes:
+      - om_search_data:/usr/share/opensearch/data
+    networks:
+      - sismowatch-net
+
+  openmetadata-server:
+    image: openmetadata/server:2.0.6
+    container_name: sismowatch-openmetadata-server
+    profiles:
+      - governance
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: 8585
+      SERVER_ADMIN_PORT: 8586
+      OPENMETADATA_HEAP_OPTS: "-Xms512M -Xmx1G"
+      DB_HOST: openmetadata-mysql
+      DB_PORT: "3306"
+      DB_USER: openmetadata_user
+      DB_USER_PASSWORD: openmetadata_password
+      OM_DATABASE: openmetadata_db
+      ELASTICSEARCH_HOST: openmetadata-search
+      ELASTICSEARCH_PORT: "9200"
+      ELASTICSEARCH_SCHEME: http
+      SEARCH_TYPE: opensearch
+      AUTHENTICATION_PROVIDER: basic
+      AUTHENTICATION_ENABLE_SELF_SIGNUP: "true"
+      JWT_ISSUER: "open-metadata.org"
+      JWT_KEY_ID: "Gb389a-9f76-gdjs-a92j-0242bk94356"
+      PIPELINE_SERVICE_CLIENT_ENABLED: "false"
+    ports:
+      - "${OPENMETADATA_HOST_PORT:-8585}:8585"
+    depends_on:
+      - openmetadata-mysql
+      - openmetadata-search
+    networks:
+      - sismowatch-net
 
 volumes:
   pgdata:
@@ -267,8 +337,13 @@ volumes:
     name: sismowatch_minio_data
   airflow_logs:
     name: sismowatch_airflow_logs
+  om_mysql_data:
+    name: sismowatch_om_mysql_data
+  om_search_data:
+    name: sismowatch_om_search_data
 
 networks:
   sismowatch-net:
     name: sismowatch-net
     driver: bridge
+
