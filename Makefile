@@ -134,6 +134,17 @@ web-up: ## Construye y arranca el frontend Vue 3 en el puerto 3000
 web-logs: ## Muestra los logs en tiempo real del contenedor web
 	$(COMPOSE) logs -f web
 
+viewer-check: ## Prueba los permisos del rol viewer (200 en lectura, 403 en cuarentena y backfill)
+	@echo "=== 1. Obteniendo token de Viewer ==="
+	@VIEWER_TOKEN=$$(curl -s -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: application/json" -d '{"email":"viewer@sismowatch.local","password":"$(VIEWER_PASSWORD)"}' | grep -o '"access_token":"[^"]*' | cut -d'"' -f4); \
+	echo "\n=== 2. Consulta autorizada a KPIs (GET /earthquakes/kpis) ==="; \
+	curl -s -H "Authorization: Bearer $$VIEWER_TOKEN" http://localhost:8000/api/v1/earthquakes/kpis; echo ""; \
+	echo "\n=== 3. Intento de acceso a Cuarentena (debe dar 403) ==="; \
+	curl -i -s -H "Authorization: Bearer $$VIEWER_TOKEN" http://localhost:8000/api/v1/quarantine | head -n 8; \
+	echo "\n=== 4. Intento de disparo de Backfill (debe dar 403) ==="; \
+	curl -i -s -H "Authorization: Bearer $$VIEWER_TOKEN" -H "Content-Type: application/json" -d '{"days":7}' http://localhost:8000/api/v1/backfill/trigger | head -n 8
+
+
 
 
 
