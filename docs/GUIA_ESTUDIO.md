@@ -337,3 +337,31 @@ En el DAG `backfill_history`:
 1. ¿Cómo se evita que un backfill histórico sobreescriba un terremoto que ya fue actualizado hoy por USGS?
 2. ¿Qué advertencia técnica se genera si la API FDSNWS alcanza el tope de 20.000 eventos?
 3. ¿Por qué es vital que `transform_silver` reciba el `run_id` exacto del backfill vía XCom?
+
+---
+
+## Módulo 7. Inteligencia Artificial en Producción: Anti-Alucinaciones y Fallback
+
+### 7.1 Principio fundamental: el código calcula, el LLM solo redacta
+En ingeniería de datos de misión crítica (monitoreo sísmico, alertas tempranas), **un LLM nunca debe realizar operaciones matemáticas ni agregaciones**:
+- Las sumas, promedios, conteos por región y magnitudes máximas son calculadas estrictamente por PostgreSQL y Spark.
+- El LLM (Ollama con `gemma:2b` o `llama3`) recibe un JSON cerrado de cifras verificadas y su única labor es redactar una síntesis en prosa técnica clara.
+
+### 7.2 Capa de Anti-Alucinación Numérica
+Antes de publicar cualquier texto generado por IA a la capa de consumo:
+- Un validador determinista extrae las magnitudes y cifras del texto generado mediante expresiones regulares.
+- Si el modelo inventa sismos cuando el periodo no tiene datos (`has_data = False`), o si exagera la magnitud máxima registrada (ej. cita un sismo M 8.5 cuando la máxima real fue M 5.2), el sistema **rechaza el texto**.
+- La discrepancia se documenta en `error_detail` y el reporte cambia inmediatamente al fallback determinista.
+
+### 7.3 Degradación Elegante y Fallback Determinista
+Un pipeline de producción nunca debe colapsar porque un proveedor externo o servicio de LLM esté fuera de línea, saturado o reiniciándose:
+- Si la conexión a Ollama falla (`ConnectionError`, timeout de 30s, código HTTP 5xx):
+  1. El error es interceptado silenciosamente sin romper el DAG.
+  2. Se invoca el motor de plantillas determinista que arma el Markdown estructurado a partir del JSON de indicadores reales.
+  3. El reporte se marca con `status='fallback'`.
+  4. La auditoría en `curated.ai_runs` registra la latencia, el error capturado y el estado `fallback`.
+
+### 7.4 Comprobación rápida
+1. ¿Por qué el LLM no debe consultar la base de datos con SQL libre?
+2. ¿Qué ocurre con el reporte diario si Ollama tarda más de 30 segundos en responder?
+3. ¿Por qué la clave primaria de `curated.ai_reports` es un UUID determinista (`uuid5`) basado en la fecha de referencia?

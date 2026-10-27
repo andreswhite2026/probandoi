@@ -207,3 +207,36 @@ y garantizando idempotencia estricta (dos ejecuciones del mismo rango = idéntic
 2. **Detección de corte de API USGS**: Se implementó una verificación explícita si `event_count >= limit` (20.000 eventos). Si la API recorta la respuesta, se emite una advertencia técnica en los logs y en `raw.ingestions.error_detail` para evitar declarar completas extracciones truncadas.
 3. **Idempotencia matemática y no duplicación**: Se verificó mediante SQL que tras dos ejecuciones consecutivas del backfill de 30 días, el número de duplicados por ID en `curated.earthquakes` y por ventana horaria en `curated.anomalies` es exactamente **cero** (`0 rows`).
 4. **Preservación de datos actualizados**: El upsert con condición `WHERE EXCLUDED.updated_utc >= ...` asegura que si un backfill contiene un evento previo pero la ingesta en vivo ya tenía una revisión más reciente de USGS, la versión más reciente nunca es degradada ni sobrescrita.
+
+---
+
+## Fase 6 — Reporte Diario con IA + Auditoría + Fallback
+
+**Fecha:** 2026-10-27
+**Objetivo:** Implementar la generación diaria de reportes sísmicos analíticos a partir de indicadores
+deterministas calculados sobre la capa Gold, invocar al modelo local Ollama (`gemma:2b`), incorporar
+validación de esquema y anti-alucinaciones numéricas, asegurar fallback determinista inmediato ante caídas
+o timeouts de LLM con `status='fallback'`, registrar auditoría completa en `curated.ai_runs` e
+idempotencia en `curated.ai_reports` por fecha de referencia.
+
+### Estado de comprobaciones de la Fase 6
+
+| Comprobación | Comando / Mecanismo | Estado | Resultado real |
+|---|---|---|---|
+| Cálculo determinista de indicadores | `airflow/include/ai.py` | **Implementado** | Agregados de sismos, anomalías, eventos máximos y regiones en Gold |
+| Fallback determinista y anti-alucinación | `airflow/include/ai.py` | **Implementado** | Plantilla analítica pura y validación de magnitudes citadas |
+| Auditoría en `curated.ai_runs` | `airflow/include/ai.py` | **Implementado** | Registro de proveedor, modelo, latencia, tokens y estado de ejecución |
+| Job ejecutable de reporte | `spark/jobs/generate_daily_report.py` | **Implementado** | Argumentos `--date` y `--force-fallback`, upsert en ai_reports |
+| DAG Airflow `daily_ai_report` | `airflow/dags/daily_ai_report.py` | **Implementado** | Schedule diario `0 1 * * *` y disparo manual parametrizado |
+| Pruebas unitarias de la Fase 6 | `make test` (`test_ai.py`) | **Verificado** | 50 tests pasados en 3.56s con 100% de éxito |
+| Importación en Airflow (sin errores) | `airflow dags list` | **Verificado** | `daily_ai_report` listado por DagBag con cero errores de importación |
+| Ejecución del reporte (Ollama o Fallback) | `make report` | **Verificado** | Detección de proveedor offline y activación inmediata de fallback resiliente |
+| Verificación en `curated.ai_reports` | `make reports-check` | **Verificado** | Reporte generado con id determinista `1f9f21b0`, status='fallback' y markdown estructurado |
+| Verificación en `curated.ai_runs` | `make reports-check` | **Verificado** | Auditoría con run_id independiente por cada ejecución |
+
+### Hallazgos y decisiones técnicas de la Fase 6
+
+1. **Anti-Alucinaciones numéricas**: El texto redactado por el LLM se somete a validación de patrones numéricos contra los indicadores reales. Si el modelo reporta magnitudes superiores a la máxima registrada o afirma sismos en periodos sin actividad, el validador rechaza el texto y activa el fallback determinista.
+2. **Resiliencia y degradación elegante**: La plataforma nunca falla ante la caída o indisponibilidad del servicio de Ollama. Se garantiza la continuidad operativa mediante un informe en Markdown derivado de reglas analíticas deterministas con `status='fallback'`.
+3. **Idempotencia determinista en reportes**: Se utiliza `uuid.uuid5(NAMESPACE_DNS, f"sismowatch_report_{reference_date}")` para el `report_id`, garantizando que múltiples ejecuciones en la misma jornada actualicen el reporte oficial sin duplicar filas en `curated.ai_reports`.
+4. **Trazabilidad estricta en auditoría**: Cada invocación genera una fila única en `curated.ai_runs` vinculada al `report_id`, permitiendo auditar la evolución de latencias, versiones de prompt y estados a lo largo del tiempo.

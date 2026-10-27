@@ -123,7 +123,7 @@ Prueba-Avanzada/
 | 3 | Spark Silver + calidad + cuarentena + Dataset trigger | **Completada** |
 | 4 | Gold + agregados + anomalías | **Completada** |
 | 5 | Backfill 30 días | **Completada** |
-| 6 | Reporte IA + auditoría + fallback | Pendiente |
+| 6 | Reporte IA + auditoría + fallback | **Completada** |
 | 7 | API + JWT + RBAC + SSE + exports + tests | Pendiente |
 | 8 | Frontend 3 vistas | Pendiente |
 | 9 | OpenMetadata + linaje + escaneo de seguridad + pytest completo | Pendiente |
@@ -134,14 +134,13 @@ Prueba-Avanzada/
 - [x] `docker compose up -d` levanta el entorno; DAGs sin errores de importación.
 - [x] Ingesta automática cada 5 min sin pasos manuales.
 - [x] Backfill 30 días idempotente (2 ejecuciones = mismo conteo).
-
-- [ ] Evento inválido nunca en Gold; queda en cuarentena con motivo.
-- [ ] Métricas de calidad consultables desde la plataforma.
-- [ ] Reporte IA real, cifras verificadas contra SQL y fallback ante caída del proveedor.
+- [x] Evento inválido nunca en Gold; queda en cuarentena con motivo.
+- [x] Métricas de calidad consultables desde la plataforma.
+- [x] Reporte IA real, cifras verificadas contra SQL y fallback ante caída del proveedor.
 - [ ] SSE: eventos nuevos sin recargar, indicador en vivo y reconexión.
 - [ ] Sin token: 401. Viewer en endpoint admin: 403.
 - [ ] Cero secretos en el repo y en el historial (evidencia de escaneo).
-- [ ] `pytest` verde con un comando.
+- [x] `pytest` verde con un comando.
 - [ ] 3 vistas, estados de carga/vacío/error en todas.
 
 ## 11. Limitaciones conocidas (a fecha de Fase 0)

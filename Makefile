@@ -69,3 +69,19 @@ gold: ## Ejecuta el job de publicación a Gold y detección de anomalías
 backfill: ## Ejecuta el backfill histórico en Airflow (ej: make backfill DAYS=30)
 	$(COMPOSE) exec -T airflow-scheduler airflow dags trigger backfill_history \
 		--conf '{"days": $(or $(DAYS),30)}'
+
+report: ## Genera el reporte diario con IA o fallback determinista
+	$(COMPOSE) exec -T airflow-scheduler python3 \
+		/opt/airflow/spark/jobs/generate_daily_report.py
+
+report-fallback: ## Genera el reporte forzando el modo fallback determinista
+	$(COMPOSE) exec -T airflow-scheduler python3 \
+		/opt/airflow/spark/jobs/generate_daily_report.py --force-fallback
+
+reports-check: ## Consulta el reporte generado, indicadores y auditoria de IA
+	$(COMPOSE) exec postgres psql -U postgres -d sismowatch -c \
+		"SELECT report_id, reference_date, provider, model, status, latency_ms, substring(summary_md from 1 for 180) AS preview FROM curated.ai_reports ORDER BY generated_at DESC LIMIT 1;"
+	$(COMPOSE) exec postgres psql -U postgres -d sismowatch -c \
+		"SELECT indicators FROM curated.ai_reports ORDER BY generated_at DESC LIMIT 1;"
+	$(COMPOSE) exec postgres psql -U postgres -d sismowatch -c \
+		"SELECT run_id, operation, provider, model, status, latency_ms, created_at FROM curated.ai_runs ORDER BY created_at DESC LIMIT 3;"
