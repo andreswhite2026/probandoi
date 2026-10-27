@@ -65,3 +65,7 @@ transform: ## Ejecuta el job de transformación Bronze a Silver con Spark
 gold: ## Ejecuta el job de publicación a Gold y detección de anomalías
 	$(COMPOSE) exec -T airflow-scheduler python3 \
 		/opt/airflow/spark/jobs/publish_gold.py
+
+backfill: ## Ejecuta el backfill histórico en Airflow (ej: make backfill DAYS=30)
+	$(COMPOSE) exec -T airflow-scheduler airflow dags trigger backfill_history \
+		--conf '{"days": $(or $(DAYS),30)}'

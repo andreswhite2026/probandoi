@@ -122,7 +122,7 @@ Prueba-Avanzada/
 | 2 | Ingesta USGS + Bronze + DAG 5 min | **Completada** |
 | 3 | Spark Silver + calidad + cuarentena + Dataset trigger | **Completada** |
 | 4 | Gold + agregados + anomalías | **Completada** |
-| 5 | Backfill 30 días | Pendiente |
+| 5 | Backfill 30 días | **Completada** |
 | 6 | Reporte IA + auditoría + fallback | Pendiente |
 | 7 | API + JWT + RBAC + SSE + exports + tests | Pendiente |
 | 8 | Frontend 3 vistas | Pendiente |
@@ -133,7 +133,8 @@ Prueba-Avanzada/
 
 - [x] `docker compose up -d` levanta el entorno; DAGs sin errores de importación.
 - [x] Ingesta automática cada 5 min sin pasos manuales.
-- [ ] Backfill 30 días idempotente (2 ejecuciones = mismo conteo).
+- [x] Backfill 30 días idempotente (2 ejecuciones = mismo conteo).
+
 - [ ] Evento inválido nunca en Gold; queda en cuarentena con motivo.
 - [ ] Métricas de calidad consultables desde la plataforma.
 - [ ] Reporte IA real, cifras verificadas contra SQL y fallback ante caída del proveedor.

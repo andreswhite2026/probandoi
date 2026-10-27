@@ -177,3 +177,33 @@ y verificar cobertura completa con pruebas automatizadas.
 2. **Idempotencia de publicación**: Se aplica `ON CONFLICT (id) DO UPDATE ... WHERE EXCLUDED.updated_utc >= curated.earthquakes.updated_utc OR curated.earthquakes.updated_utc IS NULL`, permitiendo que re-ejecuciones actualicen eventos modificados sin duplicar claves primarias.
 3. **Manejo de varianza cero en Z-Score**: En regiones con historial homogéneo o una sola observación donde la desviación estándar muestral es cero ($\sigma = 0$), el Z-Score se neutraliza a `0.000` con `is_anomaly = false`, evitando divisiones por cero indeterminadas.
 4. **Desacoplamiento Medallion**: La API de consumo (Fase 7) solo tiene acceso de lectura a `curated.earthquakes` y `curated.anomalies`, aislando completamente las capas Bronze y Staging.
+
+---
+
+## Fase 5 — Backfill Parametrizado de 30 Días
+
+**Fecha:** 2026-10-27
+**Objetivo:** Implementar la extracción histórica parametrizada desde la API FDSNWS de USGS,
+permitiendo reprocesar cualquier ventana temporal (por defecto 30 días), almacenando el payload
+crudo en Bronze (`backfill/dt=YYYY-MM-DD/<run_id>.json`), registrando el manifiesto en `raw.ingestions`
+con `source='backfill'`, ejecutando la transformación Spark y publicación Gold de extremo a extremo,
+y garantizando idempotencia estricta (dos ejecuciones del mismo rango = idéntico conteo).
+
+### Estado de comprobaciones de la Fase 5
+
+| Comprobación | Comando / Mecanismo | Estado | Resultado real |
+|---|---|---|---|
+| Construcción URL FDSNWS y cliente | `airflow/include/ingest.py` | **Implementado** | `build_usgs_query_url()` y `run_backfill_ingestion()` con detección de límite de corte |
+| Manifiesto con `window_from`/`window_to` | `raw.ingestions` | **Implementado** | Columnas temporales persistidas en manifiesto de auditoría |
+| DAG Airflow `backfill_history` | `airflow/dags/backfill_history.py` | **Implementado** | Ingesta -> Transformación -> Publicación con paso estricto de `run_id` vía XCom |
+| Suite de pruebas unitarias Fase 5 | `make test` (`test_backfill.py`) | **Verificado** | 39 tests pasados en 3.53s sin ningún fallo |
+| Importación en Airflow (sin errores) | `airflow dags list` | **Verificado** | `backfill_history` listado por DagBag con cero errores de importación |
+| Ejecución en vivo de backfill | `airflow dags trigger backfill_history` | **Verificado** | 741 terremotos históricos (30 días, mag >= 4.5) descargados y publicados a Gold en 15.1s |
+| Verificación de idempotencia (2 ejecuciones) | `SELECT count(*) FROM curated.earthquakes` | **Verificado** | Segunda corrida procesada con éxito; 0 IDs duplicados en Gold y 0 ventanas duplicadas en anomalías |
+
+### Hallazgos y decisiones técnicas de la Fase 5
+
+1. **Aislamiento por `run_id` propio**: El DAG `backfill_history` extrae y procesa exclusivamente el lote correspondiente a su propia ejecución (`{{ ti.xcom_pull(task_ids="ingest_backfill") }}`), sin interferir con la ingesta recurrente de feed de cada 5 minutos.
+2. **Detección de corte de API USGS**: Se implementó una verificación explícita si `event_count >= limit` (20.000 eventos). Si la API recorta la respuesta, se emite una advertencia técnica en los logs y en `raw.ingestions.error_detail` para evitar declarar completas extracciones truncadas.
+3. **Idempotencia matemática y no duplicación**: Se verificó mediante SQL que tras dos ejecuciones consecutivas del backfill de 30 días, el número de duplicados por ID en `curated.earthquakes` y por ventana horaria en `curated.anomalies` es exactamente **cero** (`0 rows`).
+4. **Preservación de datos actualizados**: El upsert con condición `WHERE EXCLUDED.updated_utc >= ...` asegura que si un backfill contiene un evento previo pero la ingesta en vivo ya tenía una revisión más reciente de USGS, la versión más reciente nunca es degradada ni sobrescrita.

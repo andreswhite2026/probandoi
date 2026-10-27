@@ -309,3 +309,31 @@ Para alertar sobre enjambres sísmicos o actividad anormal sin requerir modelos 
 1. ¿Por qué la API lee exclusivamente del schema `curated` y no de `staging`?
 2. ¿Qué ocurriría si una región tiene un solo terremoto histórico al calcular la desviación estándar?
 3. ¿Cómo evita `publish_gold.py` que dos ejecuciones concurrentes o repetidas generen duplicados en `curated.anomalies`?
+
+---
+
+## Módulo 6. Backfill Histórico, API FDSNWS e Idempotencia Estricta
+
+### 6.1 Feed en tiempo real vs Backfill histórico
+- **Feed (`summary/all_hour.geojson`)**: Diseñado para polling frecuente (cada 5 min). Contiene únicamente los eventos de la última hora en un tamaño muy liviano (~3–5 KB).
+- **FDSNWS Query API (`fdsnws/event/1/query`)**: Diseñado para extracciones analíticas por rango de fechas (`starttime`, `endtime`), magnitud (`minmagnitude`) y volumen (`limit=20000`). Devuelve un GeoJSON de hasta decenas de megabytes.
+
+### 6.2 Idempotencia estricta ($f(f(x)) = f(x)$)
+Un pipeline de datos profesional debe ser capaz de reejecutar cualquier lote histórico sin corromper el estado:
+1. **En MinIO Bronze**: El payload se archiva inmutablemente bajo una clave estructurada por fecha y `run_id` (`backfill/dt=YYYY-MM-DD/<run_id>.json`).
+2. **En PostgreSQL Staging y Gold**: Cláusula `ON CONFLICT (id) DO UPDATE ... WHERE EXCLUDED.updated_utc >= ...`.
+   - Si un evento ya existía, se actualiza sólo si la versión entrante es más reciente.
+   - Si la versión entrante es idéntica o más antigua, la fila se ignora.
+   - El conteo total de claves primarias únicas permanece invariable.
+3. **En Curated Anomalies**: Clave primaria compuesta `(window_start, region, method)`. El recálculo estadístico sobre la misma ventana horaria actualiza los baselines sin generar registros duplicados.
+
+### 6.3 Trazabilidad y XCom en Airflow
+En el DAG `backfill_history`:
+- La tarea `ingest_backfill` genera un `run_id` propio y lo retorna a XCom.
+- Las tareas subordinadas `transform_backfill` y `publish_backfill` leen `--run-id '{{ ti.xcom_pull(task_ids="ingest_backfill") }}'`.
+- Esto garantiza que Spark procese el lote histórico recién extraído, sin riesgo de colisión con el lote en vivo que el feed de 5 minutos genera en paralelo.
+
+### 6.4 Comprobación rápida
+1. ¿Cómo se evita que un backfill histórico sobreescriba un terremoto que ya fue actualizado hoy por USGS?
+2. ¿Qué advertencia técnica se genera si la API FDSNWS alcanza el tope de 20.000 eventos?
+3. ¿Por qué es vital que `transform_silver` reciba el `run_id` exacto del backfill vía XCom?

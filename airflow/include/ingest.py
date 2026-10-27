@@ -48,6 +48,9 @@ class IngestionResult:
     sha256: str
     status: str  # 'ok' | 'empty' | 'invalid' | 'error'
     error_detail: str | None
+    window_from: datetime | None = None
+    window_to: datetime | None = None
+
 
 
 def env(name: str, default: str | None = None) -> str:
@@ -167,10 +170,12 @@ def record_manifest(conn: psycopg2.extensions.connection, result: IngestionResul
     sql = """
     INSERT INTO raw.ingestions (
         run_id, source, source_url, fetched_at, http_status,
-        object_key, bytes, event_count, sha256, status, error_detail
+        object_key, bytes, event_count, sha256, status, error_detail,
+        window_from, window_to
     ) VALUES (
         %s, %s, %s, %s, %s,
-        %s, %s, %s, %s, %s, %s
+        %s, %s, %s, %s, %s, %s,
+        %s, %s
     )
     ON CONFLICT (run_id) DO NOTHING;
     """
@@ -189,6 +194,8 @@ def record_manifest(conn: psycopg2.extensions.connection, result: IngestionResul
                 result.sha256,
                 result.status,
                 result.error_detail,
+                result.window_from,
+                result.window_to,
             ),
         )
     conn.commit()
@@ -294,5 +301,152 @@ def run_feed_ingestion(
     # para que Airflow marque la tarea como fallida y NO emita el Dataset.
     if status in ("error", "invalid"):
         raise RuntimeError(f"Ingesta fallida (status={status}): {error_detail}")
+
+    return result
+
+
+def build_usgs_query_url(
+    starttime: str | datetime,
+    endtime: str | datetime,
+    minmagnitude: float | None = None,
+    limit: int = 20000,
+) -> str:
+    """Construye la URL del endpoint FDSNWS de USGS."""
+    if isinstance(starttime, datetime):
+        starttime_str = starttime.strftime("%Y-%m-%d")
+    else:
+        starttime_str = str(starttime).strip()
+
+    if isinstance(endtime, datetime):
+        endtime_str = endtime.strftime("%Y-%m-%d")
+    else:
+        endtime_str = str(endtime).strip()
+
+    url = (
+        f"https://earthquake.usgs.gov/fdsnws/event/1/query?"
+        f"format=geojson&starttime={starttime_str}&endtime={endtime_str}&limit={limit}"
+    )
+    if minmagnitude is not None:
+        url += f"&minmagnitude={minmagnitude}"
+    return url
+
+
+def run_backfill_ingestion(
+    start_date: str | datetime,
+    end_date: str | datetime,
+    min_magnitude: float | None = None,
+    limit: int = 20000,
+    run_id: str | None = None,
+    now: datetime | None = None,
+    s3_client: Any | None = None,
+    db_conn: psycopg2.extensions.connection | None = None,
+    session: requests.Session | None = None,
+    timeout: int = 60,
+) -> IngestionResult:
+    """
+    Orquesta la extracción histórica (backfill) desde la API FDSNWS de USGS:
+      1. Normaliza las fechas y construye la URL de consulta.
+      2. Descarga el GeoJSON con reintentos y timeout de 60s.
+      3. Valida la estructura GeoJSON y calcula SHA-256.
+      4. Almacena en MinIO Bronze inmutable: backfill/dt=YYYY-MM-DD/<run_id>.json.
+      5. Registra el manifiesto en raw.ingestions con source='backfill' y ventanas temporales.
+    """
+    if isinstance(start_date, str):
+        if "T" in start_date:
+            dt_from = datetime.fromisoformat(start_date)
+        else:
+            dt_from = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    else:
+        dt_from = start_date
+
+    if isinstance(end_date, str):
+        if "T" in end_date:
+            dt_to = datetime.fromisoformat(end_date)
+        else:
+            dt_to = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    else:
+        dt_to = end_date
+
+    query_url = build_usgs_query_url(dt_from, dt_to, minmagnitude=min_magnitude, limit=limit)
+    run_id = run_id or str(uuid.uuid4())
+    fetched_at = now or datetime.now(timezone.utc)
+    dt_str = dt_from.strftime("%Y-%m-%d")
+    object_key = f"backfill/dt={dt_str}/{run_id}.json"
+    bronze_bucket = env("SISMO_BRONZE_BUCKET", "sismowatch-bronze")
+
+    payload_bytes = b""
+    http_status = 0
+    status = "error"
+    error_detail: str | None = None
+    event_count = 0
+    sha_hash = ""
+
+    # 1. Petición HTTP
+    try:
+        http_status, payload_bytes = fetch_usgs_feed(
+            url=query_url,
+            timeout=timeout,
+            session=session,
+        )
+        if http_status == 200:
+            status = "ok"
+        else:
+            status = "error"
+            error_detail = f"Respuesta HTTP no exitosa en backfill: {http_status}"
+    except Exception as exc:
+        status = "error"
+        error_detail = f"Error en conexión HTTP backfill: {type(exc).__name__}: {exc}"
+        logger.error("Fallo al obtener backfill USGS: %s", error_detail)
+
+    # 2. Validación y hash
+    if payload_bytes:
+        sha_hash = calculate_sha256(payload_bytes)
+        if status == "ok":
+            is_valid, count, val_error = validate_geojson(payload_bytes)
+            event_count = count
+            if not is_valid:
+                status = "invalid"
+                error_detail = val_error
+            elif count == 0:
+                status = "empty"
+            else:
+                status = "ok"
+                if count >= limit:
+                    msg_limit = f"Aviso: descarga alcanzó el límite de USGS ({limit} eventos). Podría haber eventos adicionales fuera del corte."
+                    logger.warning(msg_limit)
+                    error_detail = msg_limit
+
+
+    # 3. Almacenamiento en MinIO Bronze
+    if payload_bytes:
+        s3 = s3_client or get_minio_client()
+        upload_to_bronze(s3, bronze_bucket, object_key, payload_bytes)
+
+    # 4. Registro en raw.ingestions con ventana temporal
+    result = IngestionResult(
+        run_id=run_id,
+        source="backfill",
+        source_url=query_url,
+        fetched_at=fetched_at,
+        http_status=http_status,
+        object_key=object_key,
+        bytes=len(payload_bytes),
+        event_count=event_count,
+        sha256=sha_hash or ("0" * 64),
+        status=status,
+        error_detail=error_detail,
+        window_from=dt_from,
+        window_to=dt_to,
+    )
+
+    conn = db_conn or get_db_connection()
+    try:
+        record_manifest(conn, result)
+    finally:
+        if db_conn is None:
+            conn.close()
+
+    if status in ("error", "invalid"):
+        raise RuntimeError(f"Backfill fallido (status={status}): {error_detail}")
 
     return result
