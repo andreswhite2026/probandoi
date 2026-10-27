@@ -195,6 +195,53 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  # -------------------------------------------------------------------------
+  # API: FastAPI backend (monitoreo sísmico, reportes IA, operaciones, SSE)
+  # -------------------------------------------------------------------------
+  api:
+    image: sismowatch/api:latest
+    build:
+      context: .
+      dockerfile: infra/api/Dockerfile
+    container_name: sismowatch-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      SISMO_API_USER: ${SISMO_API_USER}
+      SISMO_API_PASSWORD: ${SISMO_API_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:-sismowatch_jwt_secret_dev_key_only_change_in_prod_12345}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@sismowatch.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      VIEWER_EMAIL: ${VIEWER_EMAIL:-viewer@sismowatch.local}
+      VIEWER_PASSWORD: ${VIEWER_PASSWORD:-viewer123}
+      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma:2b}
+      AIRFLOW_BASE_URL: http://airflow-webserver:8080
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    ports:
+      - "${API_HOST_PORT:-8000}:8000"
+    volumes:
+      - ./api:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sismowatch-net
+
 volumes:
   pgdata:
     name: sismowatch_pgdata

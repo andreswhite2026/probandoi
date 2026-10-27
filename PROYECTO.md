@@ -24,18 +24,18 @@ revisión operativa por región y magnitud, y comparar la actividad reciente con
 
 | # | Requisito | Estado |
 |---|---|---|
-| 1 | Ingesta cada 5 min desde feed USGS a Bronze | Pendiente |
-| 2 | Backfill parametrizado de 30 días | Pendiente |
-| 3 | Transformación Spark Bronze → Silver | Pendiente |
-| 4 | Calidad bloqueante + cuarentena + métricas | Pendiente |
-| 5 | Publicación Gold idempotente + agregados + anomalías | Pendiente |
-| 6 | Reporte diario con IA validado y auditado | Pendiente |
-| 7 | Agente de solo lectura sobre Gold | Pendiente |
-| 8 | API JWT con roles viewer/admin | Pendiente |
-| 9 | Frontend con exactamente 3 vistas | Pendiente |
-| 10 | Tiempo real (SSE) con reconexión | Pendiente |
-| 11 | OpenMetadata con activos y linaje verificados | Pendiente |
-| 12 | Pruebas automatizadas + escaneo de seguridad | Pendiente |
+| 1 | Ingesta cada 5 min desde feed USGS a Bronze | Completado (Fase 2) |
+| 2 | Backfill parametrizado de 30 días | Completado (Fase 5) |
+| 3 | Transformación Spark Bronze → Silver | Completado (Fase 3) |
+| 4 | Calidad bloqueante + cuarentena + métricas | Completado (Fase 3) |
+| 5 | Publicación Gold idempotente + agregados + anomalías | Completado (Fase 4) |
+| 6 | Reporte diario con IA validado y auditado | Completado (Fase 6) |
+| 7 | Agente de solo lectura sobre Gold | Completado (Fase 7) |
+| 8 | API JWT con roles viewer/admin | Completado (Fase 7) |
+| 9 | Frontend con exactamente 3 vistas | Pendiente (Fase 8) |
+| 10 | Tiempo real (SSE) con reconexión | Backend Completado (Fase 7) / UI Pendiente (Fase 8) |
+| 11 | OpenMetadata con activos y linaje verificados | Pendiente (Fase 9) |
+| 12 | Pruebas automatizadas + escaneo de seguridad | 80/80 tests pasando / Escaneo Fase 9-10 |
 
 ## 3. Stack y versiones
 

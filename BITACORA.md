@@ -240,3 +240,41 @@ idempotencia en `curated.ai_reports` por fecha de referencia.
 2. **Resiliencia y degradación elegante**: La plataforma nunca falla ante la caída o indisponibilidad del servicio de Ollama. Se garantiza la continuidad operativa mediante un informe en Markdown derivado de reglas analíticas deterministas con `status='fallback'`.
 3. **Idempotencia determinista en reportes**: Se utiliza `uuid.uuid5(NAMESPACE_DNS, f"sismowatch_report_{reference_date}")` para el `report_id`, garantizando que múltiples ejecuciones en la misma jornada actualicen el reporte oficial sin duplicar filas en `curated.ai_reports`.
 4. **Trazabilidad estricta en auditoría**: Cada invocación genera una fila única en `curated.ai_runs` vinculada al `report_id`, permitiendo auditar la evolución de latencias, versiones de prompt y estados a lo largo del tiempo.
+
+---
+
+## Fase 7 — Backend FastAPI + RBAC + Mínimo Privilegio + SSE + Agente Read-Only
+
+**Fecha:** 2026-10-27
+**Objetivo:** Desarrollar el backend en FastAPI exponiendo las 3 vistas de la plataforma, autenticación JWT
+con expiración, hashing bcrypt, roles RBAC (`viewer` y `admin`), mínimo privilegio en PostgreSQL
+(rol `sismo_api` restringido exclusivamente a lectura en `curated.*` y gestión de usuarios en `app.users`),
+streaming en tiempo real vía Server-Sent Events (SSE) con reconexión y heartbeat, exportaciones CSV y GeoJSON,
+agente analítico de solo lectura sobre Gold sin SQL arbitrario, y suite de pruebas automatizadas al 100%.
+
+### Estado de comprobaciones de la Fase 7
+
+| Comprobación | Comando / Mecanismo | Estado | Resultado real |
+|---|---|---|---|
+| Módulo de seguridad y JWT | `api/app/security.py` | **Implementado** | PyJWT + bcrypt, dependencias `get_current_user` y `require_admin` |
+| Conexión con mínimo privilegio | `api/app/db.py` | **Implementado** | Rol `sismo_api`, cursores dictionary, aislamiento de raw/staging |
+| Endpoints Monitoreo Sísmico | `api/app/routers/earthquakes.py` | **Implementado** | Paginación, filtros de mag/región/tiempo, KPIs y exports CSV/GeoJSON |
+| Endpoints Reportes Diarios | `api/app/routers/reports.py` | **Implementado** | Listado de reportes históricos y detalle por fecha con indicadores |
+| Agente Analítico Read-Only | `api/app/routers/agent.py` | **Implementado** | Herramientas en Gold (kpis, strongest, regional, reports), 0 SQL arbitrario |
+| Endpoints Operaciones y Cuarentena | `api/app/routers/operations.py` | **Implementado** | Quality runs/rules, pipeline runs, cuarentena (admin) y trigger backfill (admin) |
+| Streaming en Tiempo Real (SSE) | `api/app/routers/sse.py` | **Implementado** | `EventSourceResponse` con eventos sísmicos y heartbeats periódicos |
+| Servicio Docker y Healthcheck | `infra/api/Dockerfile` + compose | **Implementado** | Servicio `api` levantado en puerto 8000 con healthcheck curl `/health` |
+| Pruebas automatizadas API (pytest) | `make test-api` | **Verificado** | 30 tests pasados en 1.43s (auth, rbac, earthquakes, reports, agent, sse) |
+| Suite global completa del proyecto | `make test-all` | **Verificado** | 80 tests pasados en 5.0s (50 pipeline Airflow + 30 API FastAPI) |
+| Verificación Mínimo Privilegio PostgreSQL | `SELECT ... FROM raw.ingestions` como `sismo_api` | **Verificado** | `ERROR: permission denied for schema raw` y `permission denied for schema staging` |
+| Verificación RBAC 401 (sin token) | `curl /api/v1/quarantine` | **Verificado** | `HTTP/1.1 401 Unauthorized` con cabecera `WWW-Authenticate: Bearer` |
+| Verificación RBAC 403 (rol viewer) | `curl -H "Bearer $VIEWER_TOKEN" /api/v1/quarantine` | **Verificado** | `HTTP/1.1 403 Forbidden` (`Permisos insuficientes: se requiere rol admin`) |
+| Verificación RBAC 200 (rol admin) | `curl -H "Bearer $ADMIN_TOKEN" /api/v1/quarantine` | **Verificado** | `HTTP/1.1 200 OK` con listado de registros |
+
+### Hallazgos y decisiones técnicas de la Fase 7
+
+1. **Cumplimiento estricto de Mínimo Privilegio Efectivo**: Se confirmó contra la base de datos real que el rol `sismo_api` es rechazado de inmediato por el motor relacional si intenta consultar `raw` o `staging`. Tampoco puede realizar escrituras en `curated`, lo cual blinda completamente el data lake frente a cualquier vector de inyección SQL o acceso indebido en la capa web.
+2. **Defensa en Profundidad en el Agente de IA**: Para evitar inyecciones de comandos o SQL a través del agente conversacional, `/api/v1/agent/query` no expone ningún intérprete de texto a SQL. Las consultas se resuelven exclusivamente mediante funciones Python con SQL parametrizado estático sobre la capa Gold. Si el LLM está desconectado, emite una síntesis analítica determinista auditada.
+3. **Resiliencia en Streaming SSE**: El generador asíncrono emite señales de latido (`event: heartbeat`) cada 15 segundos y evalúa activamente `request.is_disconnected()`. Esto evita fugas de sockets y bloqueos de hilos de trabajo cuando el cliente frontend cierra la pestaña o pierde conectividad.
+4. **Desacoplamiento de Secretos**: La API no almacena credenciales fijas en código fuente. Todas las variables (`JWT_SECRET`, credenciales de Airflow, accesos de base de datos) se inyectan a través del entorno (`.env`), cumpliendo los estándares de seguridad requeridos.
+

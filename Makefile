@@ -85,3 +85,48 @@ reports-check: ## Consulta el reporte generado, indicadores y auditoria de IA
 		"SELECT indicators FROM curated.ai_reports ORDER BY generated_at DESC LIMIT 1;"
 	$(COMPOSE) exec postgres psql -U postgres -d sismowatch -c \
 		"SELECT run_id, operation, provider, model, status, latency_ms, created_at FROM curated.ai_runs ORDER BY created_at DESC LIMIT 3;"
+
+api-up: ## Construye y arranca el servicio API en background
+	$(COMPOSE) up -d --build api
+
+api-logs: ## Muestra los logs en tiempo real del contenedor API
+	$(COMPOSE) logs -f api
+
+test-api: ## Ejecuta la suite de pruebas unitarias y de integración de la API
+	$(COMPOSE) exec -T api pytest /app/tests -v
+
+test-all: test test-api ## Ejecuta todas las pruebas (pipeline + API)
+
+rbac-check: ## Prueba en vivo los controles RBAC con curl (401, 403 viewer, 200 admin)
+	@echo "=== 1. Prueba 401 Unauthorized (sin token) ==="
+	@curl -i -s http://localhost:8000/api/v1/quarantine | head -n 8
+	@echo "\n=== 2. Prueba 403 Forbidden (con token viewer) ==="
+	@VIEWER_TOKEN=$$(curl -s -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: application/json" -d '{"email":"viewer@sismowatch.local","password":"$(VIEWER_PASSWORD)"}' | grep -o '"access_token":"[^"]*' | cut -d'"' -f4); \
+	curl -i -s -H "Authorization: Bearer $$VIEWER_TOKEN" http://localhost:8000/api/v1/quarantine | head -n 8
+	@echo "\n=== 3. Prueba 200 OK (con token admin) ==="
+	@ADMIN_TOKEN=$$(curl -s -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: application/json" -d '{"email":"admin@sismowatch.local","password":"$(ADMIN_PASSWORD)"}' | grep -o '"access_token":"[^"]*' | cut -d'"' -f4); \
+	curl -i -s -H "Authorization: Bearer $$ADMIN_TOKEN" http://localhost:8000/api/v1/quarantine | head -n 8
+
+minio-check: ## Lista los objetos en Bronze y particiones en Silver
+	@echo "=== MinIO Bronze (primeros 5 objetos) ==="
+	@docker run --rm --network sismowatch-net \
+		-e "MC_HOST_sismowatch=http://$(MINIO_ROOT_USER):$(MINIO_ROOT_PASSWORD)@minio:9000" \
+		$(MC_IMAGE) mc ls -r sismowatch/sismowatch-bronze/ | head -n 5
+	@echo "\n=== MinIO Silver (particiones de terremotos) ==="
+	@docker run --rm --network sismowatch-net \
+		-e "MC_HOST_sismowatch=http://$(MINIO_ROOT_USER):$(MINIO_ROOT_PASSWORD)@minio:9000" \
+		$(MC_IMAGE) mc ls sismowatch/sismowatch-silver/earthquakes/
+
+api-check: ## Verifica en vivo los endpoints de la API (KPIs, Export CSV/GeoJSON, Agente IA)
+	@echo "=== 1. KPIs sísmicos ==="
+	@TOKEN=$$(curl -s -X POST http://localhost:8000/api/v1/auth/login -H "Content-Type: application/json" -d '{"email":"viewer@sismowatch.local","password":"$(VIEWER_PASSWORD)"}' | grep -o '"access_token":"[^"]*' | cut -d'"' -f4); \
+	curl -s -H "Authorization: Bearer $$TOKEN" http://localhost:8000/api/v1/earthquakes/kpis; echo ""; \
+	echo "\n=== 2. Exportación CSV (cabeceras HTTP) ==="; \
+	curl -s -D - -o /dev/null -H "Authorization: Bearer $$TOKEN" "http://localhost:8000/api/v1/earthquakes/export?format=csv&limit=5" | grep -E -i "content-type|content-disposition"; \
+	echo "\n=== 3. Exportación GeoJSON (primeros 120 caracteres) ==="; \
+	curl -s -H "Authorization: Bearer $$TOKEN" "http://localhost:8000/api/v1/earthquakes/export?format=geojson&limit=2" | cut -c 1-120; echo ""; \
+	echo "\n=== 4. Agente Analítico de IA ==="; \
+	curl -s -X POST http://localhost:8000/api/v1/agent/query -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" -d '{"question":"¿Cuáles son los sismos más fuertes registrados?"}'
+
+
+
