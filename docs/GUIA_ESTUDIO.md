@@ -7,7 +7,7 @@ antes: así lo que estudias es lo que el proyecto realmente hace.
 |---|---|---|---|
 | 1 | Fundamentos de la arquitectura | Fase 0 | **Completado** |
 | 2 | Docker y Docker Compose | Fase 1 | **Completado** |
-| 3 | Apache Airflow | Fase 2-3 | Pendiente |
+| 3 | Apache Airflow (Ingesta y Datasets) | Fase 2 | **Completado (Parte 1)** |
 | 4 | Apache Spark | Fase 3-4 | Pendiente |
 | 5 | MinIO y almacenamiento | Fase 1-2 | Pendiente |
 | 6 | PostgreSQL | Fase 1-4 | Pendiente |
@@ -212,3 +212,31 @@ Comprobación: `git check-ignore -v .env` debe responder que `.gitignore` lo ign
 2. ¿Por qué la API no publica el puerto de PostgreSQL?
 3. Si `airflow-scheduler` está `Up` pero `unhealthy`, ¿qué comando miras primero?
 4. ¿Por qué el healthcheck de MinIO usa `bash` y no `curl`?
+
+---
+
+## Módulo 3. Apache Airflow (Ingesta y Datasets)
+
+### 3.1 Qué hace Airflow y qué NO debe hacer
+Airflow es un **orquestador**, no un motor de procesamiento.
+- **Lo que hace:** Programa la agenda (`*/5 * * * *`), gestiona dependencias, reintenta tareas fallidas con backoff, monitorea la salud del pipeline y registra metadatos de ejecución.
+- **Lo que NO hace:** No transforma datos masivos en memoria ni reemplaza a Spark o a la base de datos. En la Fase 2, la tarea de Python solo extrae el GeoJSON de USGS, lo valida estructuralmente, lo deposita en Bronze y escribe el manifiesto.
+
+### 3.2 Dataset Scheduling vs TriggerDagRun
+En Airflow tradicional se usaba `TriggerDagRunOperator` para encadenar tareas entre DAGs.
+En SismoWatch (Airflow 2.10+) usamos **Dataset Scheduling** (ADR-001):
+- `ingest_feed` declara un **outlet**: `outlets=[Dataset("sismowatch://bronze/feed")]`.
+- El DAG de transformación (Fase 3) no se dispara por un horario fijo, sino cuando el Dataset `sismowatch://bronze/feed` recibe una actualización exitosa.
+- **Ventaja de diseño:** Desacopla productor y consumidor. Si la ingesta falla, el Dataset **no** se emite y Spark no procesa datos inválidos. Si mañana queremos añadir otro consumidor (ej. un auditor externo), simplemente se suscribe al mismo Dataset sin modificar el DAG de ingesta.
+
+### 3.3 Por qué ON CONFLICT requiere SELECT en PostgreSQL
+Durante la certificación real de la Fase 2 observamos:
+```text
+psycopg2.errors.InsufficientPrivilege: permission denied for table ingestions
+```
+Al ejecutar `INSERT INTO raw.ingestions (...) ON CONFLICT (run_id) DO NOTHING`, el motor PostgreSQL necesita leer los índices de la tabla para determinar si la clave ya existe. Por esa razón, un rol con solo permiso de `INSERT` fallará. Para que la cláusula `ON CONFLICT` funcione con mínimo privilegio, el rol requiere tanto `INSERT` como `SELECT`.
+
+### 3.4 Comprobación rápida
+1. ¿Por qué un fallo en la descarga no emite el Dataset a Spark?
+2. ¿Qué ventaja tiene guardar el archivo crudo en MinIO incluso si viene con un JSON corrupto?
+3. ¿Por qué el cálculo del hash SHA-256 se realiza sobre los bytes crudos antes de cualquier parseo?

@@ -12,12 +12,11 @@ REVOKE CONNECT ON DATABASE :"db_name" FROM PUBLIC;
 GRANT CONNECT ON DATABASE :"db_name" TO :"ingest_user", :"transform_user", :"api_user";
 
 -- ---------------------------------------------------------------------------
--- Ingesta: solo puede insertar manifiestos
+-- Ingesta: solo puede consultar e insertar manifiestos (SELECT necesario para ON CONFLICT)
 -- ---------------------------------------------------------------------------
 GRANT USAGE ON SCHEMA raw TO :"ingest_user";
-GRANT INSERT ON raw.ingestions TO :"ingest_user";
 REVOKE ALL ON ALL TABLES IN SCHEMA raw FROM :"ingest_user";
-GRANT INSERT ON raw.ingestions TO :"ingest_user";
+GRANT SELECT, INSERT ON raw.ingestions TO :"ingest_user";
 
 -- ---------------------------------------------------------------------------
 -- Transformación (Spark): lee el manifiesto, escribe Silver y Gold

@@ -53,3 +53,6 @@ smoke: ## Smoke test Spark -> MinIO -> PostgreSQL (limpia solo lo suyo)
 	$(COMPOSE) exec -T airflow-scheduler spark-submit \
 		--master 'local[*]' --driver-memory 1g \
 		/opt/airflow/spark/jobs/_smoke.py
+
+test: ## Ejecuta las pruebas automatizadas con pytest en el contenedor
+	$(COMPOSE) exec -T airflow-scheduler pytest /opt/airflow/tests -v

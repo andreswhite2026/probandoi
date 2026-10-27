@@ -36,7 +36,8 @@ RUN pip install --no-cache-dir \
         "pyspark==3.5.1" \
         "boto3==1.34.162" \
         "psycopg2-binary==2.9.9" \
-        "requests==2.32.3"
+        "requests==2.32.3" \
+        "pytest==8.3.3"
 
 # Los wheels de PySpark no incluyen el conector S3A ni el driver de PostgreSQL.
 # Versiones alineadas con el Hadoop client que empaqueta Spark 3.5.1 (3.3.4).

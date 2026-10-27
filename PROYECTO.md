@@ -119,7 +119,7 @@ Prueba-Avanzada/
 |---|---|---|
 | 0 | Repo, secretos base, documentación, ADRs | **Completada** |
 | 1 | Compose core: Postgres+roles, MinIO+buckets, Airflow+imagen Spark | **Completada** |
-| 2 | Ingesta USGS + Bronze + DAG 5 min | Pendiente |
+| 2 | Ingesta USGS + Bronze + DAG 5 min | **Completada** |
 | 3 | Spark Silver + calidad + cuarentena + Dataset trigger | Pendiente |
 | 4 | Gold + agregados + anomalías | Pendiente |
 | 5 | Backfill 30 días | Pendiente |
@@ -131,8 +131,8 @@ Prueba-Avanzada/
 
 ## 10. Criterios de aceptación (checklist de la prueba)
 
-- [ ] `docker compose up -d` levanta el entorno; DAGs sin errores de importación.
-- [ ] Ingesta automática cada 5 min sin pasos manuales.
+- [x] `docker compose up -d` levanta el entorno; DAGs sin errores de importación.
+- [x] Ingesta automática cada 5 min sin pasos manuales.
 - [ ] Backfill 30 días idempotente (2 ejecuciones = mismo conteo).
 - [ ] Evento inválido nunca en Gold; queda en cuarentena con motivo.
 - [ ] Métricas de calidad consultables desde la plataforma.

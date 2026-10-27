@@ -87,3 +87,31 @@ y certificar con un smoke test que Spark puede leer/escribir en S3A y JDBC antes
 3. **Smoke test 100% exitoso**: Tras corregir ambos puntos, `make smoke` ejecutó el flujo completo S3A + JDBC y limpió sus registros de prueba de forma atómica.
 
 ---
+
+## Fase 2 — Ingesta USGS recurrente a Bronze con Dataset scheduling
+
+**Fecha:** 2026-10-27
+**Objetivo:** Implementar la ingesta resiliente de eventos sísmicos cada 5 minutos desde USGS,
+almacenar el payload crudo inmutable en MinIO Bronze (`bronze/feed/dt=YYYY-MM-DD/hour=HH/<run_id>.json`),
+registrar el manifiesto en `raw.ingestions` de PostgreSQL con rol de mínimo privilegio (`sismo_ingest`),
+emitir el Dataset `sismowatch://bronze/feed` al completar exitosamente, y validar con suite de pruebas unitarias.
+
+### Estado de comprobaciones de la Fase 2
+
+| Comprobación | Comando / Mecanismo | Estado | Resultado real |
+|---|---|---|---|
+| Lógica de Ingesta pura | `airflow/include/ingest.py` | **Verificado** | Cliente USGS con timeout/reintentos, validación GeoJSON, SHA-256, subida a MinIO Bronze, manifiesto en raw.ingestions |
+| DAG de Airflow cada 5 min | `airflow/dags/ingest_feed.py` | **Verificado** | Schedule `*/5 * * * *`, outlet `Dataset("sismowatch://bronze/feed")` |
+| Pruebas unitarias pytest | `make test` (`airflow/tests/test_ingest.py`) | **Verificado** | 10 passed en 3.34s (válido, vacío, corrupto, HTTP error, DAG integrity) |
+| Importación en Airflow (sin errores) | `airflow dags list` | **Verificado** | DAG `ingest_feed` reconocido sin errores de importación |
+| Ejecución real en vivo del DAG | `airflow dags test ingest_feed` | **Verificado** | Descarga USGS en 1.1s, 5 eventos, 3.862 bytes, status `ok`, run_id `f0e463d9-...` |
+| Verificación en MinIO Bronze | Objeto en `sismowatch-bronze` | **Verificado** | `feed/dt=2026-10-27/hour=13/f0e463d9-34c6-4a9e-8120-d09ae95c0520.json` |
+| Verificación en PostgreSQL | `SELECT * FROM raw.ingestions` | **Verificado** | Manifiesto insertado con sha256 `4685fef5...` y rol `sismo_ingest` |
+
+### Problemas encontrados y solución (Fase 2)
+
+1. **Transición de estado inicial en `ingest.py`**: La variable `status` iniciaba en `"error"` y no mutaba a `"ok"` al recibir HTTP 200, provocando fallas en los tests unitarios. Solución: asignación explícita `status = "ok"` tras código 200.
+2. **Permiso `SELECT` en `raw.ingestions` para `ON CONFLICT`**: En PostgreSQL, la sentencia `INSERT ... ON CONFLICT (run_id) DO NOTHING` exige permisos de lectura (`SELECT`) para comprobar el índice único. Se concedió `SELECT, INSERT` a `sismo_ingest` en `db/init/04_grants.sql` y en la base viva.
+3. **Ejecución end-to-end exitosa**: El DAG corrió en 2.52s, descargó 5 eventos reales de USGS, guardó el payload inmutable en MinIO Bronze y registró el manifiesto en PostgreSQL.
+
+---
