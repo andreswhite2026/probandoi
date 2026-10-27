@@ -242,6 +242,24 @@ services:
     networks:
       - sismowatch-net
 
+  # -------------------------------------------------------------------------
+  # Web: Frontend Vue 3 + TypeScript + Tailwind CSS (3 vistas + SSE + Leaflet)
+  # -------------------------------------------------------------------------
+  web:
+    image: sismowatch/web:latest
+    build:
+      context: .
+      dockerfile: infra/web/Dockerfile
+    container_name: sismowatch-web
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - sismowatch-net
+
 volumes:
   pgdata:
     name: sismowatch_pgdata

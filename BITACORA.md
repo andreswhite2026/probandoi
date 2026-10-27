@@ -278,3 +278,36 @@ agente analítico de solo lectura sobre Gold sin SQL arbitrario, y suite de prue
 3. **Resiliencia en Streaming SSE**: El generador asíncrono emite señales de latido (`event: heartbeat`) cada 15 segundos y evalúa activamente `request.is_disconnected()`. Esto evita fugas de sockets y bloqueos de hilos de trabajo cuando el cliente frontend cierra la pestaña o pierde conectividad.
 4. **Desacoplamiento de Secretos**: La API no almacena credenciales fijas en código fuente. Todas las variables (`JWT_SECRET`, credenciales de Airflow, accesos de base de datos) se inyectan a través del entorno (`.env`), cumpliendo los estándares de seguridad requeridos.
 
+---
+
+## Fase 8 — Frontend Vue 3 + TypeScript + Tailwind CSS + Leaflet (3 Vistas + SSE)
+
+**Fecha:** 2026-10-27
+**Objetivo:** Desarrollar e integrar la interfaz web de la plataforma en Vue 3 con Composition API, TypeScript
+y Tailwind CSS, estructurando exactamente las 3 vistas requeridas, mapa interactivo Leaflet con tema CartoDB Dark,
+conexión en tiempo real Server-Sent Events (SSE) con reconexión por backoff exponencial, chat con el Agente de IA,
+control estricto de roles RBAC (Viewer vs Admin) y despliegue en contenedor Nginx multi-stage en el puerto 3000.
+
+### Estado de comprobaciones de la Fase 8
+
+| Comprobación | Componente / Archivo | Estado | Resultado real |
+|---|---|---|---|
+| Stack tecnológico Vue 3 + TS + Tailwind | `web/package.json` | **Implementado** | Vue 3.4, Vite 5.2, Tailwind 3.4, Vue Router 4.3 y Leaflet 1.9 |
+| Vista 1: Monitoreo Sísmico | `web/src/views/SeismicMonitorView.vue` | **Verificado** | 6 tarjetas de KPIs, mapa Leaflet interactivo, tabla paginada con filtros y exports |
+| Componente Mapa Leaflet | `web/src/components/SeismicMap.vue` | **Verificado** | CartoDB Dark tiles, círculos por magnitud, popups con metadatos y enlaces USGS |
+| Streaming SSE en tiempo real | `web/src/services/sse.ts` + Banner | **Verificado** | Ticker de sismos en vivo, reconexión automática y detección de latidos |
+| Vista 2: Reportes Diarios e IA | `web/src/views/ReportsAiView.vue` | **Verificado** | Historial de reportes, visor Markdown, indicadores de Gold y chat con Agente IA |
+| Vista 3: Operaciones y Calidad | `web/src/views/OperationsView.vue` | **Verificado** | Estado de DAGs, reglas R01-R05, cuarentena y backfill protegidos por RBAC |
+| Pantalla de Login (Auth) | `web/src/views/LoginView.vue` | **Verificado** | Emisión de JWT, guardias de navegación y accesos rápidos para Viewer y Admin |
+| Despliegue Nginx y Proxy Inverso | `infra/web/Dockerfile` + `nginx.conf` | **Verificado** | Multi-stage build (Node 20 + Nginx Alpine), proxy `/api/` y buffer SSE desactivado |
+| Verificación en vivo puerto 3000 | `curl http://localhost:3000/` | **Verificado** | `HTTP/1.1 200 OK` con HTML servido por Nginx |
+| Proxy inverso hacia backend | `curl http://localhost:3000/api/v1/...` | **Verificado** | `401 Unauthorized` (`Credenciales no suministradas`) protegiendo endpoints |
+| Estado de salud en Docker | `docker compose ps` | **Verificado** | Los 6 contenedores (`postgres`, `minio`, `scheduler`, `webserver`, `api`, `web`) Up y Healthy |
+
+### Hallazgos y decisiones técnicas de la Fase 8
+
+1. **Reconexión Resiliente en SSE**: El servicio `sse.ts` gestiona desconexiones de red con reintentos programados mediante backoff exponencial (de 2s hasta 15s) y actualiza de inmediato el indicador visual del Navbar (`connected`, `reconnecting`, `disconnected`).
+2. **Coherencia RBAC Front-to-Back**: El frontend no solo oculta los controles privilegiados al rol `Viewer`, sino que muestra banners pedagógicos que explican que el servidor rechaza con `403 Forbidden` cualquier intento de consultar cuarentena o disparar backfills.
+3. **Alto Rendimiento en Nginx**: El build de producción compila los módulos de TypeScript y Vue a JavaScript nativo minificado con compresión gzip en Nginx, eliminando la sobrecarga de Node en tiempo de ejecución.
+
+

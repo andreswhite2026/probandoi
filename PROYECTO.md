@@ -32,8 +32,8 @@ revisión operativa por región y magnitud, y comparar la actividad reciente con
 | 6 | Reporte diario con IA validado y auditado | Completado (Fase 6) |
 | 7 | Agente de solo lectura sobre Gold | Completado (Fase 7) |
 | 8 | API JWT con roles viewer/admin | Completado (Fase 7) |
-| 9 | Frontend con exactamente 3 vistas | Pendiente (Fase 8) |
-| 10 | Tiempo real (SSE) con reconexión | Backend Completado (Fase 7) / UI Pendiente (Fase 8) |
+| 9 | Frontend con exactamente 3 vistas | Completado (Fase 8: Vue 3 + TS + Tailwind + Leaflet) |
+| 10 | Tiempo real (SSE) con reconexión | Completado (Fase 8: Backend + Frontend SSE con reconexión) |
 | 11 | OpenMetadata con activos y linaje verificados | Pendiente (Fase 9) |
 | 12 | Pruebas automatizadas + escaneo de seguridad | 80/80 tests pasando / Escaneo Fase 9-10 |
 
@@ -46,8 +46,8 @@ revisión operativa por región y magnitud, y comparar la actividad reciente con
 | PostgreSQL | `postgres:16` | imagen local |
 | MinIO | `cgr.dev/chainguard/minio:latest` (RELEASE.2026-09-22) | imagen local, probada |
 | OpenMetadata | `2.0.6` (+ MySQL 8 + Elasticsearch 9.3) | release publicada 2026-10-21 |
-| API | FastAPI + SQLAlchemy + psycopg2 | pendiente de instalar |
-| Frontend | React + TypeScript + Vite + Tailwind + Recharts + Leaflet | pendiente de instalar |
+| API | FastAPI + psycopg2 (mínimo privilegio sismo_api) | Verificado (Fase 7) |
+| Frontend | Vue 3 + TypeScript + Vite + Tailwind CSS + Leaflet | En certificación (Fase 8) |
 | IA | Ollama local (`gemma:2b` por defecto, `llama3` opcional) | servicio local activo en `:11434` |
 | Calidad | reglas declarativas ejecutadas por Spark | decisión ADR-007 (fase 3) |
 

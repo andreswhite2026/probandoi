@@ -128,5 +128,12 @@ api-check: ## Verifica en vivo los endpoints de la API (KPIs, Export CSV/GeoJSON
 	echo "\n=== 4. Agente Analítico de IA ==="; \
 	curl -s -X POST http://localhost:8000/api/v1/agent/query -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" -d '{"question":"¿Cuáles son los sismos más fuertes registrados?"}'
 
+web-up: ## Construye y arranca el frontend Vue 3 en el puerto 3000
+	$(COMPOSE) up -d --build web
+
+web-logs: ## Muestra los logs en tiempo real del contenedor web
+	$(COMPOSE) logs -f web
+
+
 
 
