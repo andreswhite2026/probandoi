@@ -146,3 +146,34 @@ y realizar upsert idempotente en `staging.earthquakes` (PostgreSQL).
 2. **Consolidación de fallos en cuarentena**: Si un registro viola múltiples reglas (por ejemplo, magnitud fuera de rango y coordenadas erróneas), se genera un único registro en `curated.quarantine` con los códigos y descripciones consolidados, evitando duplicación en la tabla de cuarentena.
 3. **Idempotencia en staging**: Se utiliza `ON CONFLICT (id) DO UPDATE ... WHERE EXCLUDED.updated_utc >= staging.earthquakes.updated_utc`, garantizando que actualizaciones posteriores de USGS prevalezcan sobre datos anteriores sin generar duplicados.
 4. **Permisos en PostgreSQL**: El usuario `sismo_transform` requirió permisos explícitos de `DELETE` en `curated` para permitir la limpieza atómica previa en caso de reejecución de un lote fallido.
+
+---
+
+## Fase 4 — Capa Gold + Agregados + Detección de Anomalías
+
+**Fecha:** 2026-10-27
+**Objetivo:** Implementar la publicación de la capa Gold (`curated.earthquakes`) condicionada a la
+compuerta de calidad (Quality Gate), calcular baselines estadísticos y Z-Score sobre ventanas horarias
+por región para detectar anomalías en `curated.anomalies`, actualizar el estado en `curated.pipeline_runs`,
+orquestar mediante el DAG `publish_gold` activado por el Dataset `sismowatch://silver/earthquakes`,
+y verificar cobertura completa con pruebas automatizadas.
+
+### Estado de comprobaciones de la Fase 4
+
+| Comprobación | Comando / Mecanismo | Estado | Resultado real |
+|---|---|---|---|
+| Lógica pura Gold y anomalías | `airflow/include/gold.py` | **Implementado** | Compuerta de calidad, cálculo Z-score y evaluación de ventanas horarias |
+| Job de publicación y anomalías | `spark/jobs/publish_gold.py` | **Implementado** | Upsert idempotente en curated.earthquakes y curated.anomalies |
+| DAG Airflow activado por Dataset | `airflow/dags/publish_gold.py` | **Implementado** | Schedule `[Dataset("sismowatch://silver/earthquakes")]`, outlet `sismowatch://gold/earthquakes` |
+| Pruebas unitarias de la Fase 4 | `make test` (`test_gold.py`) | **Verificado** | 35 tests pasados en 3.49s (11 gold + 10 ingest + 14 silver) |
+| Ejecución en vivo de publicación Gold | `make gold` | **Verificado** | Lote publicado exitosamente: 5 eventos publicados, 2 ventanas evaluadas |
+| Verificación en `curated.earthquakes` | `SELECT id, mag, place... FROM curated.earthquakes` | **Verificado** | 5 filas insertadas en Gold con `published_at` consistente |
+| Verificación en `curated.anomalies` | `SELECT * FROM curated.anomalies` | **Verificado** | Ventanas evaluadas para CA (4 evts, z=0.0) y Alaska (1 evt, z=0.0) |
+| Verificación en `curated.pipeline_runs` | `SELECT * FROM curated.pipeline_runs` | **Verificado** | Registro en `publish_gold` con state `success` |
+
+### Hallazgos y decisiones técnicas de la Fase 4
+
+1. **Quality Gate estricto previo a Gold**: La publicación a `curated.earthquakes` valida contra `curated.quality_runs` que el lote tenga estado `passed` y puntaje $\ge 80.0$. Un lote rechazado nunca se publica a la capa de consumo.
+2. **Idempotencia de publicación**: Se aplica `ON CONFLICT (id) DO UPDATE ... WHERE EXCLUDED.updated_utc >= curated.earthquakes.updated_utc OR curated.earthquakes.updated_utc IS NULL`, permitiendo que re-ejecuciones actualicen eventos modificados sin duplicar claves primarias.
+3. **Manejo de varianza cero en Z-Score**: En regiones con historial homogéneo o una sola observación donde la desviación estándar muestral es cero ($\sigma = 0$), el Z-Score se neutraliza a `0.000` con `is_anomaly = false`, evitando divisiones por cero indeterminadas.
+4. **Desacoplamiento Medallion**: La API de consumo (Fase 7) solo tiene acceso de lectura a `curated.earthquakes` y `curated.anomalies`, aislando completamente las capas Bronze y Staging.

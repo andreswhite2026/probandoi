@@ -121,7 +121,7 @@ Prueba-Avanzada/
 | 1 | Compose core: Postgres+roles, MinIO+buckets, Airflow+imagen Spark | **Completada** |
 | 2 | Ingesta USGS + Bronze + DAG 5 min | **Completada** |
 | 3 | Spark Silver + calidad + cuarentena + Dataset trigger | **Completada** |
-| 4 | Gold + agregados + anomalías | Pendiente |
+| 4 | Gold + agregados + anomalías | **Completada** |
 | 5 | Backfill 30 días | Pendiente |
 | 6 | Reporte IA + auditoría + fallback | Pendiente |
 | 7 | API + JWT + RBAC + SSE + exports + tests | Pendiente |

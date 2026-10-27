@@ -61,3 +61,7 @@ transform: ## Ejecuta el job de transformación Bronze a Silver con Spark
 	$(COMPOSE) exec -T airflow-scheduler spark-submit \
 		--master 'local[*]' --driver-memory 1g \
 		/opt/airflow/spark/jobs/transform_silver.py
+
+gold: ## Ejecuta el job de publicación a Gold y detección de anomalías
+	$(COMPOSE) exec -T airflow-scheduler python3 \
+		/opt/airflow/spark/jobs/publish_gold.py

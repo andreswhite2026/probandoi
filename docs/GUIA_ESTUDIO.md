@@ -283,3 +283,29 @@ WHERE EXCLUDED.updated_utc >= staging.earthquakes.updated_utc;
 1. ¿Por qué los registros rechazados no se descartan simplemente con un `drop()` silencioso?
 2. ¿Por qué si un registro falla en latitud y en magnitud debe registrarse una sola vez en cuarentena?
 3. ¿Cómo garantiza `transform_silver.py` que una reejecución del mismo `run_id` no duplique métricas en `curated.quality_runs`?
+
+---
+
+## Módulo 5. Capa Gold, Compuertas de Calidad y Detección de Anomalías
+
+### 5.1 Quality Gate: el firewall entre Staging y Gold
+Staging (`staging.earthquakes`) contiene la totalidad de los datos estructurados limpios procesados por Spark. Sin embargo, los consumidores de la plataforma (FastAPI, React, reportes IA) **nunca** leen de Staging.
+- **Principio de Quality Gate**: Antes de que un lote se publique en `curated.earthquakes`, el job valida que:
+  1. `status == 'passed'` en `curated.quality_runs`.
+  2. El puntaje ponderado de calidad sea mayor o igual al umbral requerido (`score >= 80.0`).
+  3. El número de eventos aprobados sea mayor a cero (`approved > 0`).
+- Si un lote falla en calidad, la compuerta se cierra: el lote queda en Staging/Cuarentena y **no se publica a Gold**.
+
+### 5.2 Detección de anomalías por Z-Score ($z = \frac{x - \mu}{\sigma}$)
+Para alertar sobre enjambres sísmicos o actividad anormal sin requerir modelos opacos:
+- Se agrupan los eventos en ventanas de 1 hora por región (`date_trunc('hour', time_utc)`).
+- Se calcula la media regional ($\mu$) y la desviación estándar muestral ($\sigma$).
+- **Casos de borde estadísticos:**
+  - Si una región sólo tiene una ventana o eventos idénticos ($\sigma = 0$), la división arrojaría error matemático o infinito; por diseño se neutraliza a $z = 0.0$ (`is_anomaly = false`).
+  - Si el conteo es menor al promedio ($x \le \mu$), no representa una anomalía de alta actividad sísmica.
+- **Alerta explicable:** Cuando $z \ge 2.5$, se marca `is_anomaly = true` y se genera una explicación en lenguaje natural con las cifras exactas para el operador del dashboard.
+
+### 5.3 Comprobación rápida
+1. ¿Por qué la API lee exclusivamente del schema `curated` y no de `staging`?
+2. ¿Qué ocurriría si una región tiene un solo terremoto histórico al calcular la desviación estándar?
+3. ¿Cómo evita `publish_gold.py` que dos ejecuciones concurrentes o repetidas generen duplicados en `curated.anomalies`?
