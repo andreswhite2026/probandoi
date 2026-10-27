@@ -26,7 +26,7 @@ GRANT SELECT ON raw.ingestions TO :"transform_user";
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON staging.earthquakes TO :"transform_user";
 
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA curated TO :"transform_user";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA curated TO :"transform_user";
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA curated TO :"transform_user";
 
 -- ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ GRANT SELECT, INSERT, UPDATE ON app.users TO :"api_user";
 ALTER DEFAULT PRIVILEGES IN SCHEMA curated
     GRANT SELECT ON TABLES TO :"api_user";
 ALTER DEFAULT PRIVILEGES IN SCHEMA curated
-    GRANT SELECT, INSERT, UPDATE ON TABLES TO :"transform_user";
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO :"transform_user";
 ALTER DEFAULT PRIVILEGES IN SCHEMA curated
     GRANT USAGE, SELECT ON SEQUENCES TO :"transform_user";
 

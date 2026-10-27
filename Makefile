@@ -56,3 +56,8 @@ smoke: ## Smoke test Spark -> MinIO -> PostgreSQL (limpia solo lo suyo)
 
 test: ## Ejecuta las pruebas automatizadas con pytest en el contenedor
 	$(COMPOSE) exec -T airflow-scheduler pytest /opt/airflow/tests -v
+
+transform: ## Ejecuta el job de transformación Bronze a Silver con Spark
+	$(COMPOSE) exec -T airflow-scheduler spark-submit \
+		--master 'local[*]' --driver-memory 1g \
+		/opt/airflow/spark/jobs/transform_silver.py

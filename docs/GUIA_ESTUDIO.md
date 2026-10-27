@@ -240,3 +240,46 @@ Al ejecutar `INSERT INTO raw.ingestions (...) ON CONFLICT (run_id) DO NOTHING`, 
 1. ¿Por qué un fallo en la descarga no emite el Dataset a Spark?
 2. ¿Qué ventaja tiene guardar el archivo crudo en MinIO incluso si viene con un JSON corrupto?
 3. ¿Por qué el cálculo del hash SHA-256 se realiza sobre los bytes crudos antes de cualquier parseo?
+
+---
+
+## Módulo 4. Spark, Medallion Silver y Calidad Bloqueante
+
+### 4.1 Por qué Spark en modo local y no standalone / cluster
+- En hardware acotado (~8 GB RAM de host para todo el stack de evaluación), levantar un cluster Spark distribuido (Master + N Workers) consumiría más de 3 GB solo en overhead de JVMs y procesos ociosos.
+- `local[*]` ejecuta el driver y executors en la misma JVM dentro del contenedor de Airflow, aprovechando todos los cores disponibles con mínima huella de memoria (1 GB de heap asignado) y sin latencia de red de shuffle innecesaria.
+- Si en producción el volumen creciera a decenas de millones de registros, el código PySpark se mantiene idéntico y únicamente se altera el `--master yarn` o `--master k8s://...`.
+
+### 4.2 Orden de coordenadas USGS (GeoJSON estándar)
+El formato GeoJSON (RFC 7946) y la API de USGS definen la geometría como `[longitud, latitud, elevación/profundidad]`.
+- Longitud: rango [-180, 180] (eje X).
+- Latitud: rango [-90, 90] (eje Y).
+- Profundidad: en kilómetros (eje Z, opcional o nulo si no se registra).
+Confundir latitud con longitud es un error clásico que desplaza los eventos a océanos o polos opuestos.
+
+### 4.3 Reglas de calidad declarativas (R01–R05) y aislamiento en cuarentena
+- **R01**: `id` no nulo ni vacío.
+- **R02**: `time_utc` no nulo ni en el futuro (`time_utc <= now + 5 min`).
+- **R03**: Coordenadas en rango válido (`-90 <= lat <= 90`, `-180 <= lon <= 180`).
+- **R04**: Magnitud en rango admisible (`-2.0 <= mag <= 10.0` o nulo).
+- **R05**: Tipo de evento conocido (`earthquake`, `quarry blast`, `explosion`, etc.).
+
+**Aislamiento y no pérdida de datos:**
+Los eventos que violan cualquiera de estas reglas **nunca** avanzan a `staging` ni a `curated.earthquakes`. Se aíslan en `curated.quarantine` preservando su payload `JSONB` original y consolidando los motivos de rechazo para auditoría y reentrenamiento.
+
+### 4.4 Idempotencia en Staging (Upsert)
+USGS puede actualizar metadatos de un terremoto minutos u horas después (por ejemplo, recalculando magnitud o profundidad).
+Para no generar registros duplicados ni perder la actualización más precisa:
+```sql
+INSERT INTO staging.earthquakes (...) VALUES (...)
+ON CONFLICT (id) DO UPDATE SET
+    mag = EXCLUDED.mag,
+    updated_utc = EXCLUDED.updated_utc,
+    last_seen_at = now()
+WHERE EXCLUDED.updated_utc >= staging.earthquakes.updated_utc;
+```
+
+### 4.5 Comprobación rápida
+1. ¿Por qué los registros rechazados no se descartan simplemente con un `drop()` silencioso?
+2. ¿Por qué si un registro falla en latitud y en magnitud debe registrarse una sola vez en cuarentena?
+3. ¿Cómo garantiza `transform_silver.py` que una reejecución del mismo `run_id` no duplique métricas en `curated.quality_runs`?

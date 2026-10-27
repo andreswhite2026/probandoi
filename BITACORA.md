@@ -115,3 +115,34 @@ emitir el Dataset `sismowatch://bronze/feed` al completar exitosamente, y valida
 3. **Ejecución end-to-end exitosa**: El DAG corrió en 2.52s, descargó 5 eventos reales de USGS, guardó el payload inmutable en MinIO Bronze y registró el manifiesto en PostgreSQL.
 
 ---
+
+## Fase 3 — Transformación Spark Bronze → Silver + Calidad Bloqueante + Cuarentena
+
+**Fecha:** 2026-10-27
+**Objetivo:** Procesar lotes pendientes de `raw.ingestions` con Spark 3.5.1 en modo local, parsear
+coordenadas en orden USGS `[lon, lat, depth]`, convertir timestamps a UTC, aplicar reglas de calidad
+declarativas R01–R05, aislar registros rechazados con motivos consolidados en `curated.quarantine`,
+registrar métricas en `curated.quality_runs`/`rules`, publicar Parquet particionado en MinIO Silver
+y realizar upsert idempotente en `staging.earthquakes` (PostgreSQL).
+
+### Estado de comprobaciones de la Fase 3
+
+| Comprobación | Comando / Mecanismo | Estado | Resultado real |
+|---|---|---|---|
+| Lógica de transformación y reglas R01-R05 | `airflow/include/transform.py` | **Implementado** | Heurística de región, parseo GeoJSON [lon, lat, depth], reglas R01–R05 y consolidación multi-error |
+| Job de Spark Silver | `spark/jobs/transform_silver.py` | **Implementado** | Procesamiento por lotes pendientes de raw.ingestions, Parquet particionado en MinIO, upsert staging, cuarentena |
+| Permisos DELETE en schema curated | `db/init/04_grants.sql` | **Verificado** | Añadido DELETE para transform_user en curated (idempotencia y limpieza de reintentos) |
+| DAG Airflow activado por Dataset | `airflow/dags/transform_silver.py` | **Implementado** | Schedule `[Dataset("sismowatch://bronze/feed")]`, outlet `sismowatch://silver/earthquakes` |
+| Suite de pruebas unitarias Silver | `make test` (`test_silver.py`) | **Verificado** | 24 tests pasados en 3.31s (10 ingest + 14 silver) |
+| Importación en Airflow (sin errores) | `airflow dags list` | **Verificado** | `transform_silver` listado y parseado correctamente por DagBag |
+| Ejecución Spark sobre lote real | `make transform` | **Verificado** | Lote `f0e463d9`: 5 evaluados, 5 aprobados, 0 rechazados, score 100.0, status passed |
+| Parquet generado en MinIO Silver | `s3a://sismowatch-silver/earthquakes/` | **Verificado** | Partición `dt=2026-10-27` escrita exitosamente por FileFormatWriter |
+| Upsert en `staging.earthquakes` | `SELECT count(*) FROM staging.earthquakes` | **Verificado** | Eventos insertados con preservación de updated_utc más reciente |
+| Métricas en `curated.quality_runs`/`rules` | `SELECT * FROM curated.quality_runs` | **Verificado** | Métricas consolidadas y desglose por regla persistidos con FK consistente |
+
+### Hallazgos y decisiones técnicas de la Fase 3
+
+1. **Orden de coordenadas USGS**: En GeoJSON estándar de USGS, el array de coordenadas en `geometry.coordinates` es estrictamente `[longitud, latitud, profundidad_km]`. Se garantizó la asignación posicional correcta en `transform.py` y el manejo de profundidad nula/opcional.
+2. **Consolidación de fallos en cuarentena**: Si un registro viola múltiples reglas (por ejemplo, magnitud fuera de rango y coordenadas erróneas), se genera un único registro en `curated.quarantine` con los códigos y descripciones consolidados, evitando duplicación en la tabla de cuarentena.
+3. **Idempotencia en staging**: Se utiliza `ON CONFLICT (id) DO UPDATE ... WHERE EXCLUDED.updated_utc >= staging.earthquakes.updated_utc`, garantizando que actualizaciones posteriores de USGS prevalezcan sobre datos anteriores sin generar duplicados.
+4. **Permisos en PostgreSQL**: El usuario `sismo_transform` requirió permisos explícitos de `DELETE` en `curated` para permitir la limpieza atómica previa en caso de reejecución de un lote fallido.
