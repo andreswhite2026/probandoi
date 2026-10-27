@@ -6,7 +6,7 @@ antes: así lo que estudias es lo que el proyecto realmente hace.
 | Módulo | Tema | Cuándo se completa | Estado |
 |---|---|---|---|
 | 1 | Fundamentos de la arquitectura | Fase 0 | **Completado** |
-| 2 | Docker y Docker Compose | Fase 1 | Pendiente |
+| 2 | Docker y Docker Compose | Fase 1 | **Completado** |
 | 3 | Apache Airflow | Fase 2-3 | Pendiente |
 | 4 | Apache Spark | Fase 3-4 | Pendiente |
 | 5 | MinIO y almacenamiento | Fase 1-2 | Pendiente |
@@ -118,3 +118,97 @@ Y cada fila lleva `ingest_run_id` para poder llegar hasta el objeto JSON exacto 
 2. Si USGS corrige la magnitud de un evento ya cargado, ¿qué debe pasar en `staging` y en `curated`?
 3. ¿Por qué Kafka no es necesario si el dashboard se actualiza en vivo?
 4. ¿Qué diferencia hay entre "el DAG corrió" y "el dato es correcto"?
+
+---
+
+## Módulo 2. Docker y Docker Compose
+
+### 2.1 Contenedor, imagen, volumen, red
+
+| Concepto | Qué es | Analogía | En SismoWatch |
+|---|---|---|---|
+| **Imagen** | Plantilla inmutable con el sistema de archivos y las dependencias | El molde de una figura | `sismowatch/airflow:2.10.5-py3.11` |
+| **Contenedor** | Instancia en ejecución de una imagen | La figura ya moldeada | `sismowatch-airflow-scheduler` |
+| **Volumen** | Almacenamiento gestionado por Docker que sobrevive al contenedor | Disco externo | `sismowatch_pgdata`, `sismowatch_minio_data` |
+| **Red** | Red virtual privada donde los contenedores se ven por nombre | La oficina interna | `sismowatch-net` |
+| **Puerto publicado** | Ventana del host hacia un puerto del contenedor | La puerta de la oficina | solo `8082 → 8080` (Airflow) |
+
+Un contenedor es, técnicamente, un proceso de Linux aislado con *namespaces* (qué ve) y *cgroups*
+(cuánto consume). No es una máquina virtual: comparte el kernel del host.
+
+### 2.2 Por qué `localhost` dentro de un contenedor no es el host
+
+Cada contenedor tiene su propia interfaz de red. Desde `airflow-scheduler`, `localhost` es
+**el propio contenedor**, no el equipo. Por eso:
+
+- La base de datos se llama `postgres` (nombre del servicio en la red de Compose), no `localhost`.
+- MinIO se llama `minio:9000`.
+- Para llegar al host (por ejemplo, a Ollama en el `:11434`) se usa `host.docker.internal`, que en
+  Linux se resuelve con `extra_hosts: ["host.docker.internal:host-gateway"]`.
+
+### 2.3 Los comandos, uno por uno
+
+```bash
+docker compose build          # construye la imagen propia (JDK + Spark + JAR)
+docker compose up -d          # crea y arranca contenedores en segundo plano
+docker compose ps             # estado + salud real de cada servicio
+docker compose logs -f airflow-scheduler   # logs en vivo
+docker compose exec postgres psql -U postgres -d sismowatch  # shell SQL
+docker compose down           # detiene y elimina CONTENEDORES (los volúmenes quedan)
+docker compose down -v        # ¡PELIGRO! además borra volúmenes (pierdes datos)
+```
+
+`-d` significa *detached*: el comando vuelve y los servicios siguen corriendo.
+
+### 2.4 Healthcheck: "running" no es "funcional"
+
+Un contenedor puede estar `Up` y no responder. El `healthcheck` ejecuta un comando periódico dentro
+del contenedor y marca `healthy` solo si devuelve éxito:
+
+| Servicio | Comando | Qué prueba |
+|---|---|---|
+| `postgres` | `pg_isready -U ... -d ...` | acepta conexiones SQL |
+| `minio` | `bash -c 'exec 3<>/dev/tcp/127.0.0.1/9000'` | el puerto S3 acepta conexiones |
+| `airflow-webserver` | `curl -f localhost:8080/health` | la UI responde |
+| `airflow-scheduler` | `airflow jobs check --job-type SchedulerJob` | el scheduler está vivo |
+
+`depends_on: condition: service_healthy` hace que un servicio **espere** a que el otro esté sano, no
+solo creado. `service_completed_successfully` espera a que un contenedor de un solo uso termine bien
+(aquí `airflow-init` y `minio-init`).
+
+### 2.5 Qué hace cada archivo de esta fase
+
+| Archivo | Responsabilidad |
+|---|---|
+| `docker-compose.yml` | Declara servicios, redes, volúmenes, salud y puertos |
+| `infra/airflow/Dockerfile` | Construye la imagen con Java 17, PySpark 3.5.1 y los JAR |
+| `db/init/00-run-sql.sh` | Ordena y ejecuta los SQL pasando las credenciales como variables |
+| `db/init/01..04_*.sql` | Roles, esquemas, tablas y permisos |
+| `infra/minio/init.sh` | Crea buckets y usuarios de MinIO con políticas acotadas |
+| `spark/jobs/_smoke.py` | Prueba real de las conexiones (y limpia solo lo suyo) |
+| `Makefile` | Atajos; no duplica lógica |
+
+### 2.6 Variables de entorno y secretos
+
+`.env` guarda valores reales y **está en `.gitignore`**; `.env.example` documenta las claves con
+placeholders. Docker Compose lee `.env` automáticamente para interpolar `${VARIABLES}` y además lo
+inyecta con `env_file`. Los `.sql` reciben las contraseñas como variables de `psql`, así no quedan
+escritas en el repositorio.
+
+Comprobación: `git check-ignore -v .env` debe responder que `.gitignore` lo ignora.
+
+### 2.7 Diagnóstico de un servicio que no arranca
+
+1. `docker compose ps` → ¿está `healthy` o `restarting`?
+2. `docker compose logs --tail=50 <servicio>` → el error real suele estar en la última línea.
+3. `docker compose config` → valida que el YAML y las variables interpolen.
+4. **Conectividad**: desde otro contenedor, `getent hosts postgres` o `bash -c 'exec 3<>/dev/tcp/postgres/5432'`.
+5. **Credenciales**: `psql` con el rol correcto; un `password authentication failed` no es un fallo de red.
+6. **Permisos**: `permission denied for table` sí es un fallo de `GRANT`, no de conexión.
+
+### 2.8 Comprobación rápida
+
+1. ¿Qué diferencia hay entre `docker compose down` y `down -v`?
+2. ¿Por qué la API no publica el puerto de PostgreSQL?
+3. Si `airflow-scheduler` está `Up` pero `unhealthy`, ¿qué comando miras primero?
+4. ¿Por qué el healthcheck de MinIO usa `bash` y no `curl`?

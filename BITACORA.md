@@ -54,7 +54,36 @@ esqueleto documental y de secretos antes de escribir código.
 - Por qué `localhost` dentro de un contenedor no apunta al host.
 - Por qué la disponibilidad de imágenes (tags) es un riesgo real de diseño y debe comprobarse.
 
-### Pendientes al cierre de la fase
+### Cierre de la fase
 
-- Confirmar las 3 vistas y el uso de `profile: governance` para OpenMetadata (ver `PROYECTO.md` §5).
-- Fase 1: `docker-compose.yml`, `db/init`, imagen de Airflow con Spark y smoke test.
+- Confirmadas las 3 vistas y perfil `governance` para OpenMetadata (ADR-005, ADR-006).
+
+---
+
+## Fase 1 — Entorno core y verificación de infraestructura
+
+**Fecha:** 2026-10-27
+**Objetivo:** Construir la imagen personalizada de Airflow (Spark 3.5.1 + Java 17 + JARs), inicializar
+PostgreSQL (esquemas, roles y tablas de Medallion), configurar MinIO con buckets y políticas acotadas,
+y certificar con un smoke test que Spark puede leer/escribir en S3A y JDBC antes de desarrollar DAGs.
+
+### Estado de comprobaciones de certificación
+
+| Comprobación | Comando / Mecanismo | Estado | Resultado real |
+|---|---|---|---|
+| Ausencia de secretos en Git | `git check-ignore -v .env` / `git status` | Verificado | `.env` ignorado; solo placeholders en `.env.example` |
+| Build imagen Airflow | `docker compose build` / `make build` | **Verificado** | `sismowatch/airflow:2.10.5-py3.11` construida con Spark 3.5.1 y Java 17 |
+| Salud de servicios | `docker compose ps` / `make ps` | **Verificado** | `postgres`, `minio`, `webserver`, `scheduler` todos en `(healthy)` |
+| Esquemas, roles y permisos PG | `psql -c "\dn"`, `"\du"`, queries rol `sismo_api` | **Verificado** | Esquemas `app`, `curated`, `raw`, `staging`. Rol `sismo_api`: SELECT ok en curated, `permission denied` en staging |
+| Buckets y usuarios MinIO | `make minio-ls` | **Verificado** | `sismowatch-bronze/` y `sismowatch-silver/` activos |
+| Versiones Java 17 y Spark 3.5.1 | `java -version`, `spark-submit --version` | **Verificado** | OpenJDK 17.0.21 y Spark 3.5.1 (Scala 2.12.18) |
+| Smoke test Spark (S3A + JDBC) | `make smoke` (`_smoke.py`) | **Verificado** | Parquet escrito y leído en MinIO, JDBC escrito y leído en PostgreSQL (`status: ok`) |
+| Limpieza de smoke test | validación de retorno de `_smoke.py` | **Verificado** | `parquet_deleted: true`, `rows_deleted: 2`, sin residuos |
+
+### Problemas encontrados y solución (Fase 1)
+
+1. **Sintaxis de UUID en `_smoke.py`**: El script usaba `uuid.uuid4().hex[:12]`, generando un string de 12 caracteres incompatible con el tipo estricto `uuid` de PostgreSQL. Solución: se corrigió a `str(uuid.uuid4())`.
+2. **Permiso `DELETE` en Staging**: Al ejecutar la limpieza, `sismo_transform` fallaba con `permission denied for table earthquakes` porque solo tenía `SELECT, INSERT, UPDATE`. Solución: se añadió `DELETE` a `db/init/04_grants.sql` y se aplicó el grant en la base de datos viva.
+3. **Smoke test 100% exitoso**: Tras corregir ambos puntos, `make smoke` ejecutó el flujo completo S3A + JDBC y limpió sus registros de prueba de forma atómica.
+
+---

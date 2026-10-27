@@ -1,0 +1,209 @@
+# ===========================================================================
+# SismoWatch — entorno de desarrollo
+# ---------------------------------------------------------------------------
+# Puertos publicados al host: SOLO los estrictamente necesarios.
+#   Airflow  -> 8082 (la UI que se usa a diario)
+#   API/web  -> se añaden en sus fases (8000 / 3000)
+# PostgreSQL y MinIO quedan en la red interna: no se exponen a Internet ni al
+# host. Para inspeccionarlos se usan `docker compose exec` (ver Makefile).
+# ===========================================================================
+name: sismowatch
+
+# Configuración común de los contenedores de Airflow (evita duplicar 30 líneas
+# de entorno en cada servicio).
+x-airflow-common: &airflow-common
+  image: sismowatch/airflow:2.10.5-py3.11
+  build:
+    context: .
+    dockerfile: infra/airflow/Dockerfile
+  env_file:
+    - .env
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres:5432/${AIRFLOW_DB_NAME}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "4"
+    AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "1"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"
+    AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+    # --- Datos de la aplicación -------------------------------------------
+    SISMO_DB_HOST: postgres
+    SISMO_DB_PORT: "5432"
+    SISMO_DB_NAME: ${POSTGRES_DB}
+    # --- Spark / MinIO -----------------------------------------------------
+    S3_ENDPOINT: http://minio:9000
+    AWS_ACCESS_KEY_ID: ${MINIO_SPARK_USER}
+    AWS_SECRET_ACCESS_KEY: ${MINIO_SPARK_PASSWORD}
+    AWS_REGION: ${MINIO_REGION}
+    JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+    PYSPARK_PYTHON: python3
+    PYSPARK_DRIVER_PYTHON: python3
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/include:/opt/airflow/include
+    - ./airflow/tests:/opt/airflow/tests
+    - ./spark/jobs:/opt/airflow/spark/jobs:ro
+    - airflow_logs:/opt/airflow/logs
+  user: "${AIRFLOW_UID:-50000}:0"
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    minio-init:
+      condition: service_completed_successfully
+  networks:
+    - sismowatch-net
+
+services:
+  # -------------------------------------------------------------------------
+  # PostgreSQL: datos de negocio (raw/staging/curated/app) + metadatos Airflow
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: sismowatch-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/sql:ro
+      - ./db/init/00-run-sql.sh:/docker-entrypoint-initdb.d/00-run-sql.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - sismowatch-net
+
+  # -------------------------------------------------------------------------
+  # MinIO: data lake S3-compatible (Bronze y Silver)
+  # -------------------------------------------------------------------------
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    container_name: sismowatch-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      # /dev/tcp es una función de bash: comprueba que el puerto S3 acepta conexiones.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - sismowatch-net
+
+  # -------------------------------------------------------------------------
+  # Inicialización de MinIO: buckets + usuarios/políticas. Termina y sale.
+  # -------------------------------------------------------------------------
+  minio-init:
+    image: bitnamilegacy/minio-client:2025.7.21-debian-12-r3
+    container_name: sismowatch-minio-init
+    env_file:
+      - .env
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MC_CONFIG_DIR: /tmp/.mc
+      MC_QUIET: "true"
+    volumes:
+      - ./infra/minio/init.sh:/scripts/init.sh:ro
+    entrypoint: ["/bin/bash", "/scripts/init.sh"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - sismowatch-net
+
+  # -------------------------------------------------------------------------
+  # Airflow: migración de metadatos + usuario admin (una vez por arranque)
+  # -------------------------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    container_name: sismowatch-airflow-init
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        echo "[airflow-init] migrando base de metadatos"
+        airflow db migrate
+        if airflow users list 2>/dev/null | awk -F'|' 'NR>1 {gsub(/ /,"",$2); print $2}' | grep -qx "$${AIRFLOW_ADMIN_USER}"; then
+          echo "[airflow-init] el usuario $${AIRFLOW_ADMIN_USER} ya existe"
+        else
+          echo "[airflow-init] creando usuario admin"
+          airflow users create \
+            --username "$${AIRFLOW_ADMIN_USER}" \
+            --password "$${AIRFLOW_ADMIN_PASSWORD}" \
+            --firstname Sismo --lastname Watch \
+            --role Admin \
+            --email admin@sismowatch.local
+        fi
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: sismowatch-airflow-webserver
+    command: webserver
+    ports:
+      - "${AIRFLOW_HOST_PORT:-8082}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: sismowatch-airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
+    name: sismowatch_pgdata
+  minio_data:
+    name: sismowatch_minio_data
+  airflow_logs:
+    name: sismowatch_airflow_logs
+
+networks:
+  sismowatch-net:
+    name: sismowatch-net
+    driver: bridge

@@ -59,15 +59,13 @@ revisión operativa por región y magnitud, y comparar la actividad reciente con
 | ADR-002 | No usar Kafka (batch/micro-batch) | Aprobada |
 | ADR-003 | Spark en modo `local[*]` dentro del contenedor de Airflow | Aprobada |
 | ADR-004 | MinIO canónico para Bronze/Silver lake; Postgres canónico para estado y Gold | Aprobada |
-| — | 3 vistas: Dashboard / Reportes IA / Operaciones | Propuesta, pendiente de confirmación |
-| — | OpenMetadata en `profile: governance` | Propuesta, pendiente de confirmación |
+| ADR-005 | 3 vistas: Dashboard / Reportes IA / Operaciones (login como auth, no vista de datos) | Aprobada |
+| ADR-006 | OpenMetadata en `profile: governance` (aislado por consumo de RAM hasta Fase 9) | Aprobada |
 | — | SSE como mecanismo de tiempo real | Aprobada (ver ARQUITECTURA) |
 
 ## 5. Decisiones pendientes
 
-1. Confirmación explícita del reparto de funcionalidades en las 3 vistas.
-2. Confirmación de OpenMetadata fuera del `up` base (por RAM) o dentro.
-3. Estrategia exacta de linaje en OpenMetadata (API REST declarativa vs OpenLineage automático): se
+1. Estrategia exacta de linaje en OpenMetadata (API REST declarativa vs OpenLineage automático): se
    decide en la Fase 9 con evidencia, sin afirmar nada antes de comprobarlo.
 
 ## 6. Arquitectura (resumen)
@@ -120,7 +118,7 @@ Prueba-Avanzada/
 | Fase | Contenido | Estado |
 |---|---|---|
 | 0 | Repo, secretos base, documentación, ADRs | **Completada** |
-| 1 | Compose core: Postgres+roles, MinIO+buckets, Airflow+imagen Spark | Pendiente |
+| 1 | Compose core: Postgres+roles, MinIO+buckets, Airflow+imagen Spark | **Completada** |
 | 2 | Ingesta USGS + Bronze + DAG 5 min | Pendiente |
 | 3 | Spark Silver + calidad + cuarentena + Dataset trigger | Pendiente |
 | 4 | Gold + agregados + anomalías | Pendiente |
