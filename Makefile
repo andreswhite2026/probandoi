@@ -67,6 +67,9 @@ minio-ls: ## Lista los buckets de MinIO (sin publicar puertos)
 airflow-shell: ## Shell dentro del contenedor del scheduler
 	$(COMPOSE) exec airflow-scheduler bash
 
+spark-shell: ## Inicia una sesion interactiva PySpark (activa la Spark UI en http://localhost:4040)
+	$(COMPOSE) exec airflow-scheduler pyspark --master 'local[*]'
+
 smoke: ## Smoke test Spark -> MinIO -> PostgreSQL (limpia solo lo suyo)
 	$(COMPOSE) exec -T airflow-scheduler spark-submit \
 		--master 'local[*]' --driver-memory 1g \
