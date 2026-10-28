@@ -1,10 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAuth } from './services/auth'
+import { initSSE, closeSSE } from './services/sse'
 import Navbar from './components/Navbar.vue'
 
 const route = useRoute()
+const { isAuthenticated } = useAuth()
 const isLoginPage = computed(() => route.path === '/login')
+
+watch(
+  isAuthenticated,
+  (authed) => {
+    if (authed) {
+      initSSE()
+    } else {
+      closeSSE(true)
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <template>

@@ -65,9 +65,16 @@ export function initSSE() {
       }
     })
 
-    eventSource.onerror = () => {
+    eventSource.onerror = (err) => {
+      console.warn('[SSE] EventSource error or closed, reconnecting...', err)
       sseState.status = 'reconnecting'
-      closeSSE()
+      if (eventSource) {
+        eventSource.close()
+        eventSource = null
+      }
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout)
+      }
       // Reintento con backoff exponencial
       reconnectTimeout = setTimeout(() => {
         retryDelay = Math.min(retryDelay * 1.5, 15000)
@@ -80,7 +87,7 @@ export function initSSE() {
   }
 }
 
-export function closeSSE() {
+export function closeSSE(isLogout = false) {
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout)
     reconnectTimeout = null
@@ -88,5 +95,11 @@ export function closeSSE() {
   if (eventSource) {
     eventSource.close()
     eventSource = null
+  }
+  if (isLogout) {
+    sseState.status = 'disconnected'
+    sseState.lastHeartbeat = null
+    sseState.recentEvents = []
+    retryDelay = 2000
   }
 }

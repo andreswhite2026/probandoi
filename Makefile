@@ -40,6 +40,9 @@ build: ## Construye las imágenes Docker del proyecto
 up: ## Levanta el entorno en segundo plano
 	$(COMPOSE) up -d --build
 
+up-web-minio: ## Reconstruye y levanta solo web y minio
+	$(COMPOSE) up -d --build web minio
+
 down: ## Detiene y elimina los contenedores (conserva volúmenes)
 	$(COMPOSE) down
 
@@ -59,10 +62,15 @@ psql-api: ## Consola psql con el rol de la API (para comprobar permisos)
 	$(COMPOSE) exec -e PGPASSWORD="$(SISMO_API_PASSWORD)" postgres \
 		psql -h 127.0.0.1 -U "$(SISMO_API_USER)" -d "$(POSTGRES_DB)"
 
-minio-ls: ## Lista los buckets de MinIO (sin publicar puertos)
+minio-ls: ## Lista los buckets de MinIO
 	docker run --rm --network sismowatch-net \
 		-e "MC_HOST_sismowatch=http://$(MINIO_ROOT_USER):$(MINIO_ROOT_PASSWORD)@minio:9000" \
 		$(MC_IMAGE) mc ls sismowatch
+
+minio-tree: ## Lista recursivamente todos los archivos en Bronze y Silver
+	docker run --rm --network sismowatch-net \
+		-e "MC_HOST_sismowatch=http://$(MINIO_ROOT_USER):$(MINIO_ROOT_PASSWORD)@minio:9000" \
+		$(MC_IMAGE) mc ls --recursive sismowatch
 
 airflow-shell: ## Shell dentro del contenedor del scheduler
 	$(COMPOSE) exec airflow-scheduler bash
