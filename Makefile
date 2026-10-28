@@ -5,6 +5,15 @@
 # No contiene lógica de negocio: esa vive en Airflow, Spark o la API.
 # ===========================================================================
 SHELL := /bin/bash
+
+# Detección automática del socket de Docker Rootless si DOCKER_HOST no está definido
+ifeq ($(DOCKER_HOST),)
+  USER_DOCKER_SOCK := /run/user/$(shell id -u)/docker.sock
+  ifneq ($(wildcard $(USER_DOCKER_SOCK)),)
+    export DOCKER_HOST := unix://$(USER_DOCKER_SOCK)
+  endif
+endif
+
 COMPOSE ?= docker compose
 MC_IMAGE ?= bitnamilegacy/minio-client:2025.7.21-debian-12-r3
 
@@ -29,7 +38,7 @@ build: ## Construye las imágenes Docker del proyecto
 	$(COMPOSE) build
 
 up: ## Levanta el entorno en segundo plano
-	$(COMPOSE) up -d
+	$(COMPOSE) up -d --build
 
 down: ## Detiene y elimina los contenedores (conserva volúmenes)
 	$(COMPOSE) down
