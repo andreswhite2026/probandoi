@@ -214,19 +214,19 @@ onMounted(() => {
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 <div class="p-2.5 rounded bg-slate-800/80 border border-slate-700">
                   <span class="text-slate-400 block text-[11px]">Sismos Reportados</span>
-                  <span class="text-lg font-bold text-white font-mono">{{ currentReport.indicators.total_sismos || 0 }}</span>
+                  <span class="text-lg font-bold text-white font-mono">{{ currentReport.indicators.total_events ?? currentReport.indicators.total_sismos ?? 0 }}</span>
                 </div>
                 <div class="p-2.5 rounded bg-slate-800/80 border border-slate-700">
                   <span class="text-slate-400 block text-[11px]">Mag Máxima</span>
-                  <span class="text-lg font-bold text-rose-400 font-mono">M {{ currentReport.indicators.max_magnitud || 'N/A' }}</span>
+                  <span class="text-lg font-bold text-rose-400 font-mono">M {{ currentReport.indicators.max_magnitude ?? currentReport.indicators.max_magnitud ?? 'N/A' }}</span>
                 </div>
                 <div class="p-2.5 rounded bg-slate-800/80 border border-slate-700">
                   <span class="text-slate-400 block text-[11px]">Mag Promedio</span>
-                  <span class="text-lg font-bold text-amber-400 font-mono">M {{ currentReport.indicators.avg_magnitud || 'N/A' }}</span>
+                  <span class="text-lg font-bold text-amber-400 font-mono">M {{ currentReport.indicators.avg_magnitude ?? currentReport.indicators.avg_magnitud ?? 'N/A' }}</span>
                 </div>
                 <div class="p-2.5 rounded bg-slate-800/80 border border-slate-700">
                   <span class="text-slate-400 block text-[11px]">Región Principal</span>
-                  <span class="text-xs font-bold text-sky-400 truncate block mt-1">{{ currentReport.indicators.top_region || 'N/A' }}</span>
+                  <span class="text-xs font-bold text-sky-400 truncate block mt-1">{{ currentReport.indicators.top_regions?.[0]?.region ?? currentReport.indicators.top_region ?? 'N/A' }}</span>
                 </div>
               </div>
             </div>
